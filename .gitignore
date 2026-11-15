@@ -1,0 +1,10 @@
+*.bak
+*.merged
+*.ps1
+*.py
+__MACOSX/
+.DS_Store
+Thumbs.db
+# 本地打包产出
+/dist/
+*.zip
