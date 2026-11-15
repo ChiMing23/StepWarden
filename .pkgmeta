@@ -1,13 +1,14 @@
 # BigWigsMods/packager 元数据
-# 把这个文件放在仓库根目录（也就是 StepWarden.toc 所在的同一层）
+# 放在仓库根目录，也就是 StepWarden.toc 所在的同一层
 
 package-as: StepWarden
 
-# 不进入发布包的文件（本地开发残留）
+# 不进入发布包的文件
 ignore:
   - .gitignore
   - .gitattributes
   - .github
+  - docs
   - '*.bak'
   - '*.merged'
   - '*.ps1'
@@ -15,7 +16,7 @@ ignore:
   - __MACOSX
   - .DS_Store
 
-# 从 CHANGELOG.md 读取更新日志，上传到平台时自动填入
+# 从 CHANGELOG.md 读取更新日志，发布时自动填入 Release 说明
 # 该文件本身不会被打进 zip
 manual-changelog:
   filename: CHANGELOG.md

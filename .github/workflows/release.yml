@@ -24,9 +24,6 @@ jobs:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          # -g       发布到 GitHub Release（只用 GITHUB_TOKEN，无需额外配置）
-          # -p <id>  发布到 CurseForge，需要 CF_API_KEY 和项目数字 ID
-          # -w <id>  发布到 WoWAce / Wago，需要 WAGO_API_TOKEN
-          # -m       生成手动 changelog（已在 .pkgmeta 里配置）
-          args: -g
+        # 不传 args：packager 默认即可打 zip 并发布到 GitHub Release。
+        # 想发 CurseForge 再加 -p <项目数字ID>，想发 Wago 再加 -a <addon-id>。
+        # 注意：-g 是 game-version（后面必须跟版本参数），不是"发布到 GitHub"。
