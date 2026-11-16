@@ -26,11 +26,15 @@ local function SendAM(msg, channel, target)
 end
 
 local function RegisterPrefix()
+    local ok, ret
     if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
-        pcall(C_ChatInfo.RegisterAddonMessagePrefix, C.PREFIX)
+        ok, ret = pcall(C_ChatInfo.RegisterAddonMessagePrefix, C.PREFIX)
     elseif RegisterAddonMessagePrefix then
-        pcall(RegisterAddonMessagePrefix, C.PREFIX)
+        ok, ret = pcall(RegisterAddonMessagePrefix, C.PREFIX)
+    else
+        ok, ret = false, nil
     end
+    C.prefixOK = (ok and ret ~= false) and true or false
 end
 
 --[[-----------------------------------------------------------------------------
@@ -43,8 +47,10 @@ function C:OnlineFriends()
         local n = tonumber(select(1, C_FriendList.GetNumFriends())) or 0
         for i = 1, n do
             local f = C_FriendList.GetFriendInfoByIndex(i)
-            if type(f) == "table" and f.connected and f.name then
-                table.insert(out, f.name)
+            if type(f) == "table" and f.connected then
+                -- fullName 才带 "-服务器"，跨服好友拿它当密语目标才发得出去
+                local nm = f.fullName or f.name
+                if nm then table.insert(out, nm) end
             end
         end
         return out
@@ -126,6 +132,40 @@ function C:RequestAll()
     SendToFriends(msg)
 end
 
+-- 通讯诊断
+function C:Report()
+    local out = {}
+    out[#out + 1] = "在公会      = " .. tostring(IsInGuild and IsInGuild() and true or false)
+
+    local fcount = 0
+    if C_FriendList and C_FriendList.GetNumFriends then
+        fcount = tonumber(select(1, C_FriendList.GetNumFriends())) or 0
+    elseif GetNumFriends then
+        fcount = tonumber(select(1, GetNumFriends())) or 0
+    end
+    out[#out + 1] = "好友总数    = " .. fcount
+
+    local on = C:OnlineFriends()
+    out[#out + 1] = "在线好友    = " .. #on
+    for i = 1, math.min(#on, 12) do
+        out[#out + 1] = "  好友 " .. i .. " = [" .. on[i] .. "]"
+    end
+
+    local keys, pc = {}, 0
+    if AS.db and AS.db.peers then
+        for k in pairs(AS.db.peers) do keys[#keys + 1] = k; pc = pc + 1 end
+    end
+    out[#out + 1] = "peers 条数  = " .. pc
+    table.sort(keys)
+    for i = 1, math.min(#keys, 12) do
+        out[#out + 1] = "  peers " .. i .. " = [" .. keys[i] .. "]"
+    end
+
+    out[#out + 1] = "距上次Q     = " .. (time() - (C.lastRequest or 0)) .. " 秒"
+    out[#out + 1] = "前缀已注册  = " .. tostring(C.prefixOK == true)
+    return out
+end
+
 --[[-----------------------------------------------------------------------------
 接收
 -------------------------------------------------------------------------------]]
@@ -141,8 +181,8 @@ local function StoreScore(sender, steps, trips, kcal, dateKey)
     trips = tonumber(trips) or 0
     kcal  = tonumber(kcal) or 0
 
-    -- 自己广播的会被自己收到时忽略
-    if (AS:NamePart(sender)):lower() == (AS:ShortName() or ""):lower() then return end
+    -- 自己广播的会被自己收到时忽略（半名与全名两种形态都要拦）
+    if AS:IsSelfName(sender) then return end
 
     AS.db.peers[sender] = {
         steps = steps,
@@ -160,8 +200,7 @@ function C:OnMessage(text, sender)
     if type(sender) ~= "string" then return end
 
     -- GUILD / CHANNEL 会把消息投回发送者，不加这层会把自己写进 peers
-    local sn = (AS:NamePart(sender)):lower()
-    if sn == (AS:ShortName() or ""):lower() then return end
+    if AS:IsSelfName(sender) then return end
 
     local kind = text:sub(1, 1)
 

@@ -110,6 +110,14 @@ local function Handle(msg)
         AS.Panel:SetLanguage(code)
 
     
+        elseif cmd == "name" then
+        local r = AS:NameReport()
+        for i = 1, #r do AS:Print(r[i]) end
+
+    elseif cmd == "comm" then
+        local r = AS.Comm:Report()
+        for i = 1, #r do AS:Print(r[i]) end
+
     elseif cmd == "help" then
         AS:Print(AS.S.HELP_TEXT)
 

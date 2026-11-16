@@ -2,7 +2,7 @@
 ## Title: |cFF8080FFStep|rWarden
 ## Notes: 记录每天走过的步数、交通工具次数与虚拟卡路里，每晚 22:00 在好友间结算排名。 / Tracks daily steps, rides and virtual calories, settles a friend ranking at 22:00.
 ## Author: ChiMing
-## Version: V1.0.2
+## Version: V1.0.3
 ## SavedVariables: AzerothStepsDB
 ## IconTexture: Interface\AddOns\StepWarden\Media\Badge.tga
 

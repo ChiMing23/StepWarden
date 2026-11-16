@@ -707,8 +707,7 @@ function P:BuildOptions()
         AS:Print(AS.S.TODAY_CLEARED)
     end)
 
-    
-    table.insert(UISpecialFrames, "StepWardenOptions")
+        table.insert(UISpecialFrames, "StepWardenOptions")
 
     Opt:Hide()
     P:SyncOptions()

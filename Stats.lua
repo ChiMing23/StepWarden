@@ -183,10 +183,13 @@ function S:BuildRanking()
     })
 
     if AS.db and AS.db.peers then
-        local myName = (AS:ShortName() or ""):lower()
+        local myFull = (AS:ShortName() or ""):lower()
+        -- UnitName 只给名字第一段，所以半名和全名两种形态都要排除，否则自己占两行
+        local myBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
         for key, p in pairs(AS.db.peers) do
             local nm = AS:NamePart(key)
-            if key ~= AS:CharKey() and nm:lower() ~= myName and type(p) == "table" then
+            local low = nm:lower()
+            if key ~= AS:CharKey() and low ~= myFull and low ~= myBase and type(p) == "table" then
                 table.insert(rows, {
                     key   = key,               -- 全名
                     name  = nm,                -- 角色名

@@ -5,7 +5,7 @@ StepWarden - Core
 local ADDON, AS = ...
 
 AS.ADDON   = ADDON
-AS.VERSION = "V1.0.2"
+AS.VERSION = "V1.0.3"
 
 -- 每晚结算的小时（服务器/本地时间），到点后开启新的一天
 AS.SETTLE_HOUR = 22
@@ -131,8 +131,74 @@ function AS:RealmPart(s)
 end
 
 
+-- UnitName 在无限服只返回名字的第一段（如 "全境守护者"），第二段拿不到。
+-- 但消息里的 sender 是完整 6+6 全名，所以从 peers 里把自己认回来：
+-- 找唯一一个「以本段开头、后接空格」的键，那就是自己的完整角色名。
+function AS:SelfFullName()
+    local base = AS:NamePart(UnitName("player") or "")
+    if base == "" then return "?" end
+    if not (AS.db and AS.db.peers) then return base end
+
+    local cand, cnt = nil, 0
+    for k in pairs(AS.db.peers) do
+        local nm = AS:NamePart(k)
+        if nm ~= base and nm:sub(1, #base + 1) == base .. " " then
+            cnt = cnt + 1
+            cand = nm
+        end
+    end
+    if cnt == 1 then return cand end
+    return base
+end
+
 function AS:ShortName()
-    return AS:NamePart(UnitName("player") or "?")
+    return AS:SelfFullName()
+end
+
+-- 判断某个 sender / 名字是不是自己：半名和全名两种形态都算
+function AS:IsSelfName(s)
+    if type(s) ~= "string" or s == "" then return false end
+    local sn = (AS:NamePart(s) or ""):lower()
+    if sn == "" then return false end
+    local full = (AS:SelfFullName() or ""):lower()
+    local base = (AS:NamePart(UnitName("player") or "") or ""):lower()
+    return sn == full or sn == base
+end
+
+-- 诊断：把名字相关的实际取值一次性打出来
+function AS:NameReport()
+    local base = AS:NamePart(UnitName("player") or "")
+    local list = {}
+    list[#list + 1] = "UnitName      = [" .. tostring(UnitName("player")) .. "]"
+    if GetUnitName then
+        local ok, v = pcall(GetUnitName, "player")
+        list[#list + 1] = "GetUnitName   = [" .. tostring(ok and v or "err") .. "]"
+    else
+        list[#list + 1] = "GetUnitName   = (nil)"
+    end
+    if UnitFullName then
+        local ok, a, b = pcall(UnitFullName, "player")
+        list[#list + 1] = "UnitFullName  = [" .. tostring(ok and a or "err") .. "] / [" .. tostring(ok and b or "") .. "]"
+    else
+        list[#list + 1] = "UnitFullName  = (nil)"
+    end
+    list[#list + 1] = "GetRealmName  = [" .. tostring(GetRealmName()) .. "]"
+    list[#list + 1] = "NamePart      = [" .. base .. "]"
+    list[#list + 1] = "CharKey       = [" .. AS:CharKey() .. "]"
+    list[#list + 1] = "SelfFullName  = [" .. AS:SelfFullName() .. "]"
+
+    if AS.db and AS.db.peers then
+        local hits = {}
+        for k in pairs(AS.db.peers) do
+            local nm = AS:NamePart(k)
+            if nm:sub(1, #base) == base then hits[#hits + 1] = k end
+        end
+        table.sort(hits)
+        for i = 1, #hits do
+            list[#list + 1] = "peers 命中 " .. i .. " = [" .. hits[i] .. "]"
+        end
+    end
+    return list
 end
 
 -- 当前统计窗口的标识：22:00 前属于前一天
@@ -302,12 +368,14 @@ function AS:InitDB()
 
     local key = AS:CharKey()
 
-    -- 旧版本会把自己写进 peers，这里自清洁
+    -- 旧版本会把自己写进 peers，这里自清洁。
+    -- 只能用 UnitName 的半名当基准：ShortName() 会反过来读 peers 找全名，
+    -- 在这里调用会形成循环依赖，把别人也判错删掉。
     if db.peers then
-        local myName = (AS:ShortName() or ""):lower()
+        local myBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
         for pk in pairs(db.peers) do
             local pn = (AS:NamePart(pk)):lower()
-            if pk == key or pn == myName then
+            if pk == key or (myBase ~= "" and pn == myBase) then
                 db.peers[pk] = nil
             end
         end
