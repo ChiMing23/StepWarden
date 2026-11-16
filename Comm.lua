@@ -129,6 +129,10 @@ end
 --[[-----------------------------------------------------------------------------
 接收
 -------------------------------------------------------------------------------]]
+-- CHAT_MSG_ADDON 的 sender：同服玩家只有角色名，跨服玩家才带 "-真实服务器"。
+-- 注意：本客户端的 GetRealmName() 返回的是集群代号（形如 "CN1 Realm 8 PvE"），
+-- 与玩家看到的服务器名（如"弥林女王"）并不一致，拿它拼后缀只会拼出错的名字。
+-- 所以这里原样保存 sender，需要服务器信息的场合才拼。
 local function StoreScore(sender, steps, trips, kcal, dateKey)
     if not sender or sender == "" then return end
     if not AS.db then return end
@@ -138,8 +142,7 @@ local function StoreScore(sender, steps, trips, kcal, dateKey)
     kcal  = tonumber(kcal) or 0
 
     -- 自己广播的会被自己收到时忽略
-    local me = AS:CharKey()
-    if sender == me or sender == AS:ShortName() then return end
+    if (AS:NamePart(sender)):lower() == (AS:ShortName() or ""):lower() then return end
 
     AS.db.peers[sender] = {
         steps = steps,
@@ -210,9 +213,12 @@ function C:WasLiked(targetKey)
 end
 
 function C:SendLike(targetName, targetKey, steps)
-    if not targetName or targetName == "" then return false end
+    -- 优先用带服务器后缀的 key 当目标：跨服好友只有全名才发得出去
+    local dest = targetKey
+    if not dest or dest == "" then dest = targetName end
+    if not dest or dest == "" then return false end
 
-    C:MarkLiked(targetKey or targetName)
+    C:MarkLiked(dest)
 
     if not AS:IsLikeWhisperEnabled() then
         return true
@@ -223,7 +229,12 @@ function C:SendLike(targetName, targetKey, steps)
         AS:Comma(steps or 0)
     )
 
-    local ok = pcall(SendChatMessage, msg, "WHISPER", nil, targetName)
+    local ok, err = pcall(SendChatMessage, msg, "WHISPER", nil, dest)
+    if not ok and AS.Print then
+        -- 以前这里静默吞掉错误，玩家只会觉得"点赞了但没收到密语"
+        AS:Print(string.format(
+            (AS.S and AS.S.LIKE_WS_FAIL) or "Whisper to %s failed.", dest))
+    end
     return ok
 end
 

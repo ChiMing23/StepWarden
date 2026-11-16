@@ -173,8 +173,8 @@ function S:BuildRanking()
     if not c then return rows end
 
     table.insert(rows, {
-        key   = AS:CharKey(),
-        name  = AS:ShortName(),
+        key   = AS:CharKey(),      -- 全名，供密语等需要服务器的场合使用
+        name  = AS:ShortName(),    -- 角色名
         steps = c.steps or 0,
         trips = c.trips or 0,
         kcal  = c.kcal or 0,
@@ -188,8 +188,8 @@ function S:BuildRanking()
             local nm = AS:NamePart(key)
             if key ~= AS:CharKey() and nm:lower() ~= myName and type(p) == "table" then
                 table.insert(rows, {
-                    key   = key,
-                    name  = nm,
+                    key   = key,               -- 全名
+                    name  = nm,                -- 角色名
                     steps = p.steps or 0,
                     trips = p.trips or 0,
                     kcal  = p.kcal or 0,

@@ -5,7 +5,7 @@ StepWarden - Core
 local ADDON, AS = ...
 
 AS.ADDON   = ADDON
-AS.VERSION = "V1.0.1"
+AS.VERSION = "V1.0.2"
 
 -- 每晚结算的小时（服务器/本地时间），到点后开启新的一天
 AS.SETTLE_HOUR = 22
@@ -102,6 +102,8 @@ end
 
 function AS:CharKey()
     local n = UnitName("player") or "?"
+    -- UnitName 在部分客户端已带 "-服务器" 后缀，再拼一次会变成 名字-服务器-服务器
+    if n:find("-", 1, true) then return n end
     local r = GetRealmName() or "?"
     return n .. "-" .. r
 end
@@ -109,8 +111,25 @@ end
 -- 从 "Name-Realm" / "Name Realm" / "Name" 里取出纯角色名
 function AS:NamePart(s)
     if type(s) ~= "string" or s == "" then return "" end
-    return s:match("^([^%s%-]+)") or s
+    -- 只剥掉 "-服务器" 后缀，名字内部的空格必须保留。
+    -- 无限服支持 6+6 的十二字命名（如 "全境守护者 弥林女王"），空格是名字的一部分，
+    -- 早期写法用 "^([^%s%-]+)" 会在空格处截断，导致只显示前六个字。
+    local i = s:find("-", 1, true)
+    if i then
+        local head = s:sub(1, i - 1)
+        if head ~= "" then return head end
+    end
+    return s
 end
+
+-- 从 "名字-服务器" 里取出服务器段；没有后缀返回 nil
+function AS:RealmPart(s)
+    if type(s) ~= "string" then return nil end
+    local r = s:match("%-(.*)$")
+    if not r or r == "" or r == s then return nil end
+    return r
+end
+
 
 function AS:ShortName()
     return AS:NamePart(UnitName("player") or "?")
@@ -470,6 +489,7 @@ L.zhCN = {
 
     -- 私信 / Whisper
     WHISPER_LIKE    = "【艾泽拉斯足迹】给你点了个赞！上期你走了 %s 步，挺能跑。",
+    LIKE_WS_FAIL    = "密语没发出去：找不到 %s，对方可能不在本服好友列表里。",
 }
 
 L.enUS = {
@@ -582,6 +602,7 @@ L.enUS = {
     HELP_TEXT       = "/step panel · /step config settings · /step mini show widget · /step alpha 0.8 opacity · /step reset clear today · /step clear friend cache · /step wipe clear history · /step test simulate settle",
 
     WHISPER_LIKE    = "[StepWarden] gave you a like! You walked %s steps last cycle - nice pace.",
+    LIKE_WS_FAIL    = "Whisper not delivered - %s could not be reached. They may not be on this realm.",
 }
 
 -- 加载即初始化中文，InitDB 会按存档覆盖；保证 AS.S 永不为空

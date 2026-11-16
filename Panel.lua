@@ -553,7 +553,7 @@ function P:BuildOptions()
     if Opt then return end
 
     Opt = CreateFrame("Frame", "StepWardenOptions", UIParent)
-    Opt:SetSize(320, 344)
+    Opt:SetSize(320, 384)
     Opt:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     Opt:SetFrameStrata("DIALOG")
     Opt:SetClampedToScreen(true)
@@ -707,7 +707,7 @@ function P:BuildOptions()
         AS:Print(AS.S.TODAY_CLEARED)
     end)
 
-
+    
     table.insert(UISpecialFrames, "StepWardenOptions")
 
     Opt:Hide()
@@ -1120,7 +1120,9 @@ function P:Refresh()
                 row.data = d
                 row:Show()
                 row.rank:SetText(tostring(i))
-                row.name:SetText(d.name or "?")
+                -- 列表只渲染角色名：服务器名（如 "CN1 Realm 8 PvE"）有 20 个字符，
+        -- 拼上去会撑满 242px 的名字列并被右侧数字列挤掉，完整名放到悬停提示里看
+        row.name:SetText(d.name or "?")
                 row.steps:SetText(string.format(AS.S.STEPS_VAL, AS:Comma(m(d.steps or 0))))
                 row.kcal:SetText(string.format(AS.S.KCAL_VAL, AS:Comma(m(d.kcal or 0))))
 

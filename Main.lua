@@ -109,6 +109,7 @@ local function Handle(msg)
         end
         AS.Panel:SetLanguage(code)
 
+    
     elseif cmd == "help" then
         AS:Print(AS.S.HELP_TEXT)
 
