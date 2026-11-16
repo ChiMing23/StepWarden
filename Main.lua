@@ -111,12 +111,61 @@ local function Handle(msg)
 
     
         elseif cmd == "name" then
-        local r = AS:NameReport()
-        for i = 1, #r do AS:Print(r[i]) end
+        local f = AS.NameReport
+        if type(f) ~= "function" then
+            AS:Print("/step name 不可用：Core.lua 还是旧版，请 /reload 后重试")
+        else
+            local ok, r = pcall(f, AS)
+            if ok and type(r) == "table" then
+                for i = 1, #r do AS:Print(r[i]) end
+            else
+                AS:Print("/step name 执行出错：" .. tostring(r))
+            end
+        end
 
     elseif cmd == "comm" then
-        local r = AS.Comm:Report()
-        for i = 1, #r do AS:Print(r[i]) end
+        local C = AS.Comm
+        if not (C and type(C.Report) == "function") then
+            AS:Print("/step comm 不可用：Comm.lua 还是旧版，请 /reload 后重试")
+        else
+            local ok, r = pcall(C.Report, C)
+            if ok and type(r) == "table" then
+                for i = 1, #r do AS:Print(r[i]) end
+            else
+                AS:Print("/step comm 执行出错：" .. tostring(r))
+            end
+        end
+
+    elseif cmd == "send" then
+        local c = AS.char
+        if not c then
+            AS:Print("还没有角色数据，先走两步。")
+        else
+            AS.Comm:BroadcastScore({
+                steps = c.steps or 0,
+                trips = c.trips or 0,
+                kcal = c.kcal or 0,
+                date = c.window or AS:WindowKey(),
+            })
+            local st = AS.Comm.lastSend or {}
+            AS:Print("广播已发出：目标 " .. tostring(st.total or 0)
+                .. " / 成功 " .. tostring(st.ok or 0)
+                .. " / 失败 " .. tostring(st.fail or 0))
+            if st.lastErr then AS:Print("  错误：" .. tostring(st.lastErr)) end
+        end
+
+    elseif cmd == "bn" then
+        local C = AS.Comm
+        if not (C and type(C.BNApi) == "function") then
+            AS:Print("/step bn 不可用：Comm.lua 还是旧版，请 /reload 后重试")
+        else
+            local ok, r = pcall(C.BNApi, C)
+            if ok and type(r) == "table" then
+                for i = 1, #r do AS:Print(r[i]) end
+            else
+                AS:Print("/step bn 执行出错：" .. tostring(r))
+            end
+        end
 
     elseif cmd == "help" then
         AS:Print(AS.S.HELP_TEXT)

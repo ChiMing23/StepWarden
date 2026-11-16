@@ -14,15 +14,45 @@ C.lastRequest = 0   -- RequestAll 节流时间戳
 底层发送
 -------------------------------------------------------------------------------]]
 local function SendAM(msg, channel, target)
+    local sent, err = false, nil
+
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
-        local ok, err = pcall(C_ChatInfo.SendAddonMessage, C.PREFIX, msg, channel, target)
-        return ok
+        local ok, a, b = pcall(C_ChatInfo.SendAddonMessage, C.PREFIX, msg, channel, target)
+        if ok then
+            -- a 是接口自己的返回值：true 成功 / false 失败；nil 表示该版本不返回
+            if a == nil then sent = true else sent = (a and true or false) end
+            err = b
+        else
+            sent = false
+            err = tostring(a)
+        end
+    elseif SendAddonMessage then
+        local ok, a, b = pcall(SendAddonMessage, C.PREFIX, msg, channel, target)
+        if ok then
+            if a == nil then sent = true else sent = (a and true or false) end
+            err = b
+        else
+            sent = false
+            err = tostring(a)
+        end
+    else
+        return false, "没有可用的发送接口"
     end
-    if SendAddonMessage then
-        local ok, err = pcall(SendAddonMessage, C.PREFIX, msg, channel, target)
-        return ok
+
+    -- 汇总一次广播的成败，供 /step comm 查看
+    local st = C.lastSend
+    if st then
+        st.total = (st.total or 0) + 1
+        if sent then
+            st.ok = (st.ok or 0) + 1
+        else
+            st.fail = (st.fail or 0) + 1
+            st.lastErr = tostring(err or "?") .. "  @ " .. tostring(channel)
+                .. " -> " .. tostring(target or "-")
+        end
     end
-    return false
+
+    return sent, err
 end
 
 local function RegisterPrefix()
@@ -69,8 +99,198 @@ function C:OnlineFriends()
     return out
 end
 
+-- 从一份好友账号信息里把"正在玩的角色名-服务器"取出来。
+local function toonFromAccount(info)
+    if type(info) ~= "table" then return nil end
+    local ga = info.gameAccountInfo
+    if type(ga) ~= "table" then return nil end
+
+    local cp = ga.clientProgram
+    if cp ~= nil and cp ~= "WoW" then return nil end
+
+    local cn = ga.characterName
+    if type(cn) ~= "string" or cn == "" then return nil end
+
+    local cr = ga.characterRealmName
+    if type(cr) == "string" and cr ~= "" then return cn .. "-" .. cr end
+    return cn
+end
+
+-- 战网好友里正在玩 WoW 的那些，能拿到对方的角色名与服务器。
+-- 跨阵营、跨公会的朋友只能靠这条线：好友列表里没有他们，公会频道也覆盖不到。
+-- 注意：正式服的老接口 BNGetFriendInfo 在这个客户端不存在，
+-- 真正的数据在 C_BattleNet.GetFriendAccountInfo 的 gameAccountInfo 里。
+function C:BNToons()
+    local out, seen = {}, {}
+    if not BNGetNumFriends then return out end
+
+    local okn, n = pcall(BNGetNumFriends)
+    if not okn then return out end
+    n = tonumber(n) or 0
+    if n <= 0 then return out end
+
+    local function take(full)
+        if type(full) == "string" and full ~= "" and not seen[full] then
+            seen[full] = true
+            out[#out + 1] = full
+        end
+    end
+
+    local getAcc = C_BattleNet and C_BattleNet.GetFriendAccountInfo
+    if type(getAcc) == "function" then
+        for i = 1, n do
+            local ok, info = pcall(getAcc, i)
+            if ok then
+                if type(info) == "table" then
+                    take(toonFromAccount(info))
+                    -- 一个人可能有多个游戏账号，逐个看
+                    local numGA = C_BattleNet.GetFriendNumGameAccounts
+                    if type(numGA) == "function" then
+                        local okc, cnt = pcall(numGA, i)
+                        if okc and tonumber(cnt) and tonumber(cnt) > 1 then
+                            local getGA = C_BattleNet.GetFriendGameAccountInfo
+                            if type(getGA) == "function" then
+                                for g = 2, tonumber(cnt) do
+                                    local okg, ga = pcall(getGA, i, g)
+                                    if okg and type(ga) == "table" then
+                                        take(toonFromAccount({ gameAccountInfo = ga }))
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- 兜底：万一某个版本还留着老接口
+    if #out == 0 and type(BNGetFriendInfo) == "function" then
+        for i = 1, n do
+            local ok, info = pcall(BNGetFriendInfo, i)
+            if ok and type(info) == "table" then
+                local toon, realm, client = info.toonName, info.toonRealm, info.client
+                if type(toon) == "string" and toon ~= ""
+                    and (client == nil or client == "WoW") then
+                    take(toon .. ((type(realm) == "string" and realm ~= "") and ("-" .. realm) or ""))
+                end
+            end
+        end
+    end
+
+    return out
+end
+
 function C:FriendCount()
-    return #C:OnlineFriends()
+    return #C:OnlineFriends() + #C:BNToons()
+end
+
+-- 探测本客户端到底暴露了哪些战网相关 API。
+-- 正式服的 BNGetFriendInfo 在这里不存在，但好友数又有 184，说明命名不同。
+-- 诊断结果额外存一份到存档，reload 后能从 SavedVariables 直接读，
+-- 不用对着聊天框截图，也不依赖聊天记录。
+function C:SaveDiag(kind, lines)
+    local db = AS and AS.db
+    if not db then return end
+    if type(db.diag) ~= "table" then db.diag = {} end
+    db.diag[kind] = lines
+end
+
+function C:BNApi()
+    local out = {}
+
+    local names = {}
+    local okScan = pcall(function()
+        for k, v in pairs(_G) do
+            if type(k) == "string" and k:sub(1, 2) == "BN" then
+                names[#names + 1] = k .. "  (" .. type(v) .. ")"
+            end
+        end
+    end)
+    if not okScan then
+        out[#out + 1] = "扫描全局表失败，改用逐个探测"
+    end
+    table.sort(names)
+    out[#out + 1] = "全局 BN* 函数：" .. #names .. " 个"
+    for i = 1, math.min(#names, 40) do
+        out[#out + 1] = "  " .. names[i]
+    end
+
+    if C_BattleNet then
+        local members = {}
+        pcall(function()
+            for k, v in pairs(C_BattleNet) do
+                members[#members + 1] = tostring(k) .. "  (" .. type(v) .. ")"
+            end
+        end)
+        table.sort(members)
+        out[#out + 1] = "C_BattleNet：" .. #members .. " 个"
+        for i = 1, math.min(#members, 30) do
+            out[#out + 1] = "  " .. members[i]
+        end
+    else
+        out[#out + 1] = "C_BattleNet = (nil)"
+    end
+
+    -- BNGetNumFriends 的真实返回值（老版可能返回两个数）
+    if BNGetNumFriends then
+        local ok, a, b = pcall(BNGetNumFriends)
+        out[#out + 1] = "BNGetNumFriends -> [" .. tostring(a) .. "] [" .. tostring(b) .. "]"
+    end
+
+    -- 看一个在线好友的真实字段，确认角色名到底藏在哪一层
+    out[#out + 1] = "BNGetFriendInfo 存在 = " .. tostring(type(BNGetFriendInfo) == "function")
+    local getAcc = C_BattleNet and C_BattleNet.GetFriendAccountInfo
+    out[#out + 1] = "GetFriendAccountInfo 存在 = " .. tostring(type(getAcc) == "function")
+
+    if type(getAcc) == "function" and BNGetNumFriends then
+        local okn, n = pcall(BNGetNumFriends)
+        n = tonumber(n) or 0
+        local shown = 0
+        for i = 1, math.min(n, 60) do
+            local ok, info = pcall(getAcc, i)
+            if ok and type(info) == "table" then
+                local ga = info.gameAccountInfo
+                if type(ga) == "table" and type(ga.characterName) == "string"
+                    and ga.characterName ~= "" then
+                    shown = shown + 1
+                    out[#out + 1] = "--- 有角色的好友 #" .. i .. " ---"
+                    local top = {}
+                    for k in pairs(info) do top[#top + 1] = k end
+                    table.sort(top)
+                    out[#out + 1] = "  顶层: " .. table.concat(top, ", ")
+                    local gk = {}
+                    for k in pairs(ga) do gk[#gk + 1] = k end
+                    table.sort(gk)
+                    out[#out + 1] = "  gameAccountInfo: " .. table.concat(gk, ", ")
+                    out[#out + 1] = "  -> 角色 [" .. tostring(ga.characterName) .. "]"
+                        .. " 服 [" .. tostring(ga.characterRealmName) .. "]"
+                        .. " 端 [" .. tostring(ga.clientProgram) .. "]"
+                        .. " 在线 [" .. tostring(ga.isOnline) .. "]"
+                        .. " 职业 [" .. tostring(ga.className) .. "]"
+                    if shown >= 2 then break end
+                end
+            end
+        end
+        if shown == 0 then out[#out + 1] = "  前 60 个好友里没有带角色名的" end
+    end
+
+    local st = C.lastSend
+    if st then
+        out[#out + 1] = "上次广播    = 目标 " .. tostring(st.total or 0)
+            .. " / 成功 " .. tostring(st.ok or 0)
+            .. " / 失败 " .. tostring(st.fail or 0)
+        if st.lastErr then out[#out + 1] = "  最后错误 = " .. st.lastErr end
+    else
+        out[#out + 1] = "上次广播    = 还没发过"
+    end
+
+    local got = C:BNToons()
+    out[#out + 1] = "BNToons 实际取到 = " .. #got
+    for i = 1, math.min(#got, 10) do out[#out + 1] = "  取到 " .. i .. " = [" .. got[i] .. "]" end
+
+    C:SaveDiag("bn", out)
+    return out
 end
 
 --[[-----------------------------------------------------------------------------
@@ -80,6 +300,21 @@ end
 -- 一次性发几十条会被静默丢弃，所以每次只发 2 条、间隔 0.5 秒。
 local function SendToFriends(msg)
     local friends = C:OnlineFriends()
+
+    -- 叠加战网好友当前角色，去重后一起发；这条通道能覆盖跨阵营、跨公会的人
+    local bn = C:BNToons()
+    if #bn > 0 then
+        local seen = {}
+        for i = 1, #friends do seen[friends[i]] = true end
+        for i = 1, #bn do
+            local nm = bn[i]
+            if nm and nm ~= "" and not seen[nm] then
+                seen[nm] = true
+                table.insert(friends, nm)
+            end
+        end
+    end
+
     if #friends == 0 then return end
 
     if not (C_Timer and C_Timer.After) then
@@ -104,6 +339,8 @@ end
 
 function C:BroadcastScore(entry)
     if not entry then return end
+
+    C.lastSend = { total = 0, ok = 0, fail = 0 }
     local msg = string.format("S|%d|%d|%d|%s",
         math.floor(entry.steps or 0),
         math.floor(entry.trips or 0),
@@ -151,6 +388,17 @@ function C:Report()
         out[#out + 1] = "  好友 " .. i .. " = [" .. on[i] .. "]"
     end
 
+    out[#out + 1] = "BN API      = " .. tostring(BNGetNumFriends ~= nil and BNGetFriendInfo ~= nil)
+    if BNGetNumFriends then
+        local okn, bnTotal = pcall(BNGetNumFriends)
+        out[#out + 1] = "BN 好友总数 = " .. tostring(okn and tonumber(bnTotal) or "err")
+    end
+    local bn = C:BNToons()
+    out[#out + 1] = "BN 在玩WoW   = " .. #bn
+    for i = 1, math.min(#bn, 12) do
+        out[#out + 1] = "  BN " .. i .. " = [" .. bn[i] .. "]"
+    end
+
     local keys, pc = {}, 0
     if AS.db and AS.db.peers then
         for k in pairs(AS.db.peers) do keys[#keys + 1] = k; pc = pc + 1 end
@@ -163,6 +411,8 @@ function C:Report()
 
     out[#out + 1] = "距上次Q     = " .. (time() - (C.lastRequest or 0)) .. " 秒"
     out[#out + 1] = "前缀已注册  = " .. tostring(C.prefixOK == true)
+
+    C:SaveDiag("comm", out)
     return out
 end
 
@@ -289,3 +539,37 @@ end)
 pcall(f.RegisterEvent, f, "CHAT_MSG_ADDON")
 
 RegisterPrefix()
+
+--[[-----------------------------------------------------------------------------
+自动诊断
+加载后自动把运行环境写进存档，省得手动敲命令再截图。
+存档只在 reload/logout 时落盘，所以要跑两次 /reload 才能读到。
+------------------------------------------------------------------------------]]
+local function autoDiag()
+    pcall(function()
+        if type(C.Report) == "function" then C:SaveDiag("comm", C:Report()) end
+        if type(C.BNApi) == "function" then C:SaveDiag("bn", C:BNApi()) end
+    end)
+end
+
+local diagDone = false
+local function scheduleDiag()
+    if diagDone then return end
+    diagDone = true
+    autoDiag()
+end
+
+if C_Timer and C_Timer.After then
+    C_Timer.After(5, scheduleDiag)
+else
+    -- 老客户端没有 C_Timer，退到 OnUpdate 计时
+    local tick, elapsed = 0, 0
+    local tf = CreateFrame("Frame")
+    tf:SetScript("OnUpdate", function(self, dt)
+        elapsed = elapsed + dt
+        if elapsed >= 5 then
+            self:SetScript("OnUpdate", nil)
+            scheduleDiag()
+        end
+    end)
+end
