@@ -1,5 +1,31 @@
 # StepWarden Changelog
 
+## V1.0.5 - 2026-11-16 - UI overhaul and rank badges
+
+### Added
+
+- **Gold / silver / bronze badges for the top three.** The leader gets a gold crown, second gets silver, third gets bronze. The gold badge is one size larger while silver and bronze stay equal. Badges are inlined after the character name, so they follow the name length instead of colliding with the step column.
+- **Paging arrows on the leaderboard.** Two arrow buttons sit at the right end of the title row for browsing past five friends. The arrow greys out and stops responding on the first or last page.
+- **Options footer.** Version and author are shown centred at the bottom of the settings panel. The version is read from `AS.VERSION`, so it stays in sync when the addon version changes.
+
+### Changed
+
+- **Settings and close buttons now use gold-framed icons.** Gear for settings, X for close. The icons carry their own dark stone backing in the same family as the panel, so they sit flush without an extra backing block. Hover now brightens the icon itself.
+- **Today card re-laid out to use the available space.** Step number 36 to 46 px. Calorie ring 82 to 148 px, centred in the right half, with the inner number raised from 26 to 46 px and the unit moved inside the ring so it cannot fall out of the card. "Steps today" and the distance line are both 18 px now, with "steps today" in dark gold.
+- **The middle three stats are horizontally centred.** Walking, riding and travel now align to the card axis, symmetric with the background light band. A fixed width with centre justification keeps Chinese and English aligned.
+- **Leaderboard row height raised from 44 to 49 px.** The vertical space freed by the removed like bar goes back to the list.
+
+### Removed
+
+- **The "like the leader" bar below the ranking.** Every row already has its own like button, so this bar was redundant and consumed vertical space. Liking still works normally.
+
+### Fixed
+
+- **Leaderboard snapping back to rank 1.** The refresh function wrote back the scroll position, and refresh is called very frequently by step changes and timers, so any moment with a shorter list pushed the view back to the start. Refresh now only computes a display position and never writes state.
+- **The "environment diagnostics recorded" message spamming chat on login.** Diagnostics are still written to saved variables, just no longer printed to chat. Read the saved variables when you need to debug.
+
+---
+
 ## V1.0.4 - 2026-11-16 - Battle.net friend channel
 
 ### Added
