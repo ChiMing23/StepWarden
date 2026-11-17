@@ -15,6 +15,10 @@ ignore:
   - '*.py'
   - __MACOSX
   - .DS_Store
+  # 历史遗留的冗余副本，插件本体就在根目录
+  - StepWarden
+  # 已被 GearA.tga 取代，插件不再引用
+  - Media/Gear.tga
 
 # 从 CHANGELOG.md 读取更新日志，发布时自动填入 Release 说明
 # 该文件本身不会被打进 zip

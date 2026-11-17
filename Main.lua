@@ -91,8 +91,19 @@ local function Handle(msg)
     elseif cmd == "test" then
         local c = AS.char
         if c then
-            AS.Stats:Settle(c.window or AS:WindowKey())
-            AS:Print(AS.S.TEST_DONE)
+            -- 包一层 pcall：结算链条里任何一步报错都能看到原文，
+            -- 否则会被当成"没反应"。
+            local ok, err = pcall(AS.Stats.Settle, AS.Stats, c.window or AS:WindowKey())
+            if ok then
+                AS:Print(AS.S.TEST_DONE)
+                local dates = AS.Stats:HistDates()
+                AS:Print(string.format(
+                    "归档后：%d 期 · 排行 %d 人 · 最近一期 %s",
+                    #dates, AS.Stats:GetRankingCount() or 0,
+                    dates[1] or "无"))
+            else
+                AS:Print("结算失败：" .. tostring(err))
+            end
             AS.Panel:Refresh()
         end
 
@@ -165,6 +176,13 @@ local function Handle(msg)
             else
                 AS:Print("/step bn 执行出错：" .. tostring(r))
             end
+        end
+
+    elseif cmd == "hist" or cmd == "history" then
+        if AS.Panel and type(AS.Panel.OpenHistory) == "function" then
+            AS.Panel:OpenHistory()
+        else
+            AS:Print("/step hist 不可用：Panel.lua 还是旧版，请 /reload 后重试")
         end
 
     elseif cmd == "help" then

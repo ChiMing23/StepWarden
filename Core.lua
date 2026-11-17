@@ -5,7 +5,7 @@ StepWarden - Core
 local ADDON, AS = ...
 
 AS.ADDON   = ADDON
-AS.VERSION = "V1.0.4"
+AS.VERSION = "V1.0.6"
 
 -- 每晚结算的小时（服务器/本地时间），到点后开启新的一天
 AS.SETTLE_HOUR = 22
@@ -17,6 +17,7 @@ AS.MAX_STEP_RATE   = 3.2         -- 每秒步数上限，防止速度插值把�
 AS.MAX_STEP_DT     = 0.5         -- 单帧最大积分时长，防卡顿跳变
 AS.SAMPLE_DT       = 0.2         -- 速度采样节流
 AS.KEEP_DAYS       = 7           -- 保留最近几期结算
+AS.HIST_DAYS       = 3           -- 历史记录页展示最近几期（个人数据与好友排行快照）
 
 -- 皮肤
 AS.WHITE8X8 = "Interface\\Buttons\\WHITE8X8"
@@ -383,6 +384,9 @@ function AS:InitDB()
     if type(db.chars[key]) ~= "table" then db.chars[key] = {} end
     local c = db.chars[key]
 
+    -- 每日结算时冻结的排行快照，供历史记录页回看
+    if type(db.snapshots) ~= "table" then db.snapshots = {} end
+
     c.window      = c.window or ""
     c.yards       = c.yards or 0
     c.steps       = c.steps or 0
@@ -474,7 +478,7 @@ L.zhCN = {
     MINI_OK         = "挂件已唤出，当前可见：%s。",
 
     -- 面板 / Panel
-    PANEL_TITLE     = "运动数据插件",
+    PANEL_TITLE     = "艾泽拉斯运动健康",
     PANEL_SUB       = "每日结算 · 好友排行 · 点赞互动",
     TIP_SETTINGS    = "设置",
     TIP_SETTINGS2   = "也可以用 /step config 打开",
@@ -537,6 +541,23 @@ L.zhCN = {
     OPT_RESET_DONE  = "挂件已移回屏幕右侧中央。",
     OPT_LIKEWHISPER = "点赞时发送私信",
     OPT_CLEAR_DAY   = "清空今日",
+    OPT_HISTORY     = "历史记录",
+
+    -- 历史记录页
+    HIST_TITLE      = "历史记录",
+    HIST_SUB        = "近 3 天 · 每晚 22:00 结算后归档",
+    HIST_EMPTY      = "还没有历史记录。每晚 22:00 结算后，这里会留下当天 的个人数据与好友排行。",
+    HIST_MINE       = "我的",
+    HIST_TOP        = "当日前三",
+    HIST_RANK       = "第 %d 名 / 共 %d 人",
+    HIST_NORANK     = "未上榜",
+    HIST_LINE_FMT   = "%s 步 · %s 公里 · %s 千卡",
+    HIST_DATE_FMT   = "%s  ·  %s",
+    HIST_OPEN       = "过去 3 天",
+    HIST_BACK       = "返回今日",
+    HIST_TOP_ALL    = "当日排行",
+    HIST_EMPTY_TITLE = "暂无记录",
+    HIST_SETTLED    = "当日已归档",
     OPT_CLEAR_FRI   = "清空好友",
     OPT_CLEAR_ALL   = "清空全部",
     TODAY_CLEARED   = "今日数据已清零。",
@@ -553,7 +574,7 @@ L.zhCN = {
     CLEAR_DONE      = "好友缓存已清空。",
     TEST_DONE       = "已按当前数据模拟结算一次（历史与广播都走了真实流程）。",
     UNKNOWN_CMD     = "未知命令：%s，试试 /step help",
-    HELP_TEXT       = "/step 打开面板 · /step config 打开设置 · /step mini 唤出挂件 · /step alpha 0.8 透明度 · /step reset 清零今日 · /step clear 清好友缓存 · /step wipe 清空历史 · /step test 模拟结算",
+    HELP_TEXT       = "/step 打开面板 · /step config 打开设置 · /step mini 唤出挂件 · /step alpha 0.8 透明度 · /step reset 清零今日 · /step clear 清好友缓存 · /step wipe 清空历史 · /step hist 历史记录 · /step test 模拟结算",
 
     -- 私信 / Whisper
     WHISPER_LIKE    = "【艾泽拉斯足迹】给你点了个赞！上期你走了 %s 步，挺能跑。",
@@ -590,7 +611,7 @@ L.enUS = {
     MINI_VOID       = "|cffff5555Widget is still nil; creation did not finish. Please send me the earlier red text.|r",
     MINI_OK         = "Widget shown, visible: %s.",
 
-    PANEL_TITLE     = "Activity Tracker",
+    PANEL_TITLE     = "Azeroth Fitness",
     PANEL_SUB       = "Daily settle · Friend ranking · Likes",
     TIP_SETTINGS    = "Settings",
     TIP_SETTINGS2   = "Or open with /step config",
@@ -652,6 +673,23 @@ L.enUS = {
     OPT_RESET_DONE  = "Widget moved back to the right center of the screen.",
     OPT_LIKEWHISPER = "Whisper on like",
     OPT_CLEAR_DAY   = "Clear today",
+    OPT_HISTORY     = "History",
+
+    -- History page
+    HIST_TITLE      = "History",
+    HIST_SUB        = "Last 3 days · archived after the 22:00 settlement",
+    HIST_EMPTY      = "No history yet. After the 22:00 settlement, this page keeps that day's personal stats and friend ranking.",
+    HIST_MINE       = "Me",
+    HIST_TOP        = "Top 3",
+    HIST_RANK       = "Rank %d of %d",
+    HIST_NORANK     = "Unranked",
+    HIST_LINE_FMT   = "%s steps · %s km · %s kcal",
+    HIST_DATE_FMT   = "%s  ·  %s",
+    HIST_OPEN       = "Last 3 days",
+    HIST_BACK       = "Back to today",
+    HIST_TOP_ALL    = "That day's ranking",
+    HIST_EMPTY_TITLE = "No records",
+    HIST_SETTLED    = "Archived",
     OPT_CLEAR_FRI   = "Clear friends",
     OPT_CLEAR_ALL   = "Clear all",
     TODAY_CLEARED   = "Today's data has been cleared.",
@@ -667,7 +705,7 @@ L.enUS = {
     CLEAR_DONE      = "Friend cache cleared.",
     TEST_DONE       = "Simulated one settlement with current data (history and broadcast ran for real).",
     UNKNOWN_CMD     = "Unknown command: %s. Try /step help",
-    HELP_TEXT       = "/step panel · /step config settings · /step mini show widget · /step alpha 0.8 opacity · /step reset clear today · /step clear friend cache · /step wipe clear history · /step test simulate settle",
+    HELP_TEXT       = "/step panel · /step config settings · /step mini show widget · /step alpha 0.8 opacity · /step reset clear today · /step clear friend cache · /step wipe clear history · /step hist history · /step test simulate settle",
 
     WHISPER_LIKE    = "[StepWarden] gave you a like! You walked %s steps last cycle - nice pace.",
     LIKE_WS_FAIL    = "Whisper not delivered - %s could not be reached. They may not be on this realm.",

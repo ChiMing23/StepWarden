@@ -557,6 +557,7 @@ local function scheduleDiag()
     if diagDone then return end
     diagDone = true
     autoDiag()
+    -- 诊断结果照常写进存档，但不再往聊天框打提示，免得每次登录都刷一条
 end
 
 if C_Timer and C_Timer.After then
