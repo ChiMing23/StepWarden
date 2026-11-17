@@ -538,6 +538,17 @@ function P:Relocalize()
             end
         end
         if Opt.zhBtn and Opt.zhBtn.label then Opt.zhBtn.label:SetText(AS.S.OPT_LANG_ZH) end
+        -- 历史页开着时同步入口按钮、日期标签与整页文案
+        if P.histBtnLabel then P.histBtnLabel:SetText(AS.S.HIST_OPEN) end
+        if P.retBtnLabel then P.retBtnLabel:SetText(AS.S.HIST_BACK) end
+        if P.histTabs then
+            for i = 1, #P.histTabs do
+                if P.histTabs[i].dateKey then
+                    P.histTabs[i].label:SetText((AS.HistDateParts(P.histTabs[i].dateKey)))
+                end
+            end
+        end
+        if P.histView then pcall(P.Refresh, P) end
         if Opt.enBtn and Opt.enBtn.label then Opt.enBtn.label:SetText(AS.S.OPT_LANG_EN) end
     end
 end
@@ -711,8 +722,9 @@ function P:BuildOptions()
     credit:SetText((AS.VERSION or "") .. "  ·  ChiMing")
     Opt.creditText = credit
 
-    -- 只保留「清空今日」；「清空好友」「清空全部」已隐藏，改为整行居中
-    mkButton(Opt, 110, -292, 100, 28, "OPT_CLEAR_DAY", function()
+    -- 只保留「清空今日」；「清空好友」「清空全部」已隐藏。
+    -- 左移给右侧腾出位置，右边接一个「历史记录」按钮。
+    mkButton(Opt, 96, -292, 100, 28, "OPT_CLEAR_DAY", function()
         local c = AS.char
         if c then
             c.yards, c.steps, c.kcal = 0, 0, 0
@@ -727,6 +739,12 @@ function P:BuildOptions()
         table.insert(UISpecialFrames, "StepWardenOptions")
 
     Opt:Hide()
+
+    -- 设置面板右侧的「历史记录」按钮
+    mkButton(Opt, 204, -292, 100, 28, "OPT_HISTORY", function()
+        P:OpenHistory()
+    end)
+
     P:SyncOptions()
 end
 
@@ -924,10 +942,9 @@ function P:Build()
     -- 榜单固定 5 行，好友超过 5 个时用右侧两个箭头翻页。
     -- 不挂滚动条：面板是贴图底，灰色滑块会破坏观感。
     local function goPage(dir)
-        local n = 0
-        if type(AS.Stats.GetRankingCount) == "function" then
-            n = AS.Stats:GetRankingCount() or 0
-        end
+        -- 用当前这一页实际的总人数。历史页的总人数来自快照，
+        -- 和今日榜单不是同一份数据，所以不能直接问 GetRankingCount。
+        local n = P.lastTotal or 0
         if n <= MAX_ROWS then return end
         local maxTop = n - MAX_ROWS + 1
         scrollTop = scrollTop + dir
@@ -935,6 +952,8 @@ function P:Build()
         if scrollTop > maxTop then scrollTop = maxTop end
         P:Refresh()
     end
+    -- 箭头按钮的 OnClick 调的是 P.goPage，这里必须挂上去。
+    -- 之前只留了个 local function，P.goPage 一直是 nil，点了直接报错。
     P.goPage = goPage
 
     el.empty = txt(box, 12, C_DIM)
@@ -986,6 +1005,26 @@ function P:Build()
     selfLike:SetScript("OnLeave", function() AS.FlatTex(sbg, 0.72, 0.56, 0.26, 0.95) end)
 
     -- 页脚
+    P.selfLike = selfLike
+
+    -- 返回今日：占「为自己点赞」的位置，尺寸与底色完全一致，
+    -- 历史页显示它，今日页显示自我点赞，两者互斥。
+    local retBtn = CreateFrame("Button", nil, mine)
+    retBtn:SetSize(112, 26)
+    retBtn:SetPoint("RIGHT", mine, "RIGHT", -16, 0)
+    local rbg = retBtn:CreateTexture(nil, "ARTWORK")
+    rbg:SetAllPoints(retBtn)
+    AS.FlatTex(rbg, 0.72, 0.56, 0.26, 0.95)
+    local rtx = txt(retBtn, 13, { 0.16, 0.12, 0.05 })
+    rtx:SetPoint("CENTER", retBtn, "CENTER", 0, 0)
+    rtx:SetText(AS.S.HIST_BACK)
+    retBtn:SetScript("OnClick", function() P:HideHistory() end)
+    retBtn:SetScript("OnEnter", function() AS.FlatTex(rbg, 0.85, 0.68, 0.33, 1) end)
+    retBtn:SetScript("OnLeave", function() AS.FlatTex(rbg, 0.72, 0.56, 0.26, 0.95) end)
+    retBtn:Hide()
+    P.retBtn = retBtn
+    P.retBtnLabel = rtx
+
     el.foot = txt(MK, 13, C_DIM)
     el.foot:SetPoint("TOP", MK, "TOP", 0, -658)
     el.foot:SetText(AS.S.FOOT_NOTE)
@@ -1052,6 +1091,83 @@ function P:Build()
     pt:SetText("+")
     plus:SetScript("OnClick", function() P:StepAlpha(0.06) end)
 
+    --[[ 过去 3 天：入口按钮 + 日期标签 + 覆盖层 --------------------------
+        入口放在排行榜标题行中部（原来显示日期的那一格）；
+        点开后用一个覆盖层盖住今日界面，日期标签排在标题行右侧，
+        点标签切换日期，再点入口按钮或「返回今日」回到今日视图。
+    ------------------------------------------------------------------------]]
+    -- 与「为自己点赞」完全同款：金色实心底、26 高、13px 深色字、悬停提亮。
+    -- 尺寸固定在这里，FillTabs 只负责显隐，不会再改它的大小。
+    local histBtn = CreateFrame("Button", nil, MK)
+    histBtn:SetSize(112, 26)
+    histBtn:SetPoint("TOPLEFT", MK, "TOPLEFT", 232, -314)
+    local hbg = histBtn:CreateTexture(nil, "ARTWORK")
+    hbg:SetAllPoints(histBtn)
+    AS.FlatTex(hbg, 0.72, 0.56, 0.26, 0.95)
+
+    local hbt = txt(histBtn, 13, { 0.16, 0.12, 0.05 })
+    hbt:SetPoint("CENTER", histBtn, "CENTER", 0, 0)
+    hbt:SetText(AS.S.HIST_OPEN)
+
+    histBtn:SetScript("OnEnter", function() AS.FlatTex(hbg, 0.85, 0.68, 0.33, 1) end)
+    histBtn:SetScript("OnLeave", function() AS.FlatTex(hbg, 0.72, 0.56, 0.26, 0.95) end)
+    histBtn:SetScript("OnClick", function() P:OpenHistory() end)
+    -- 抬高到覆盖层之上，历史模式里也能点它切回今日
+    histBtn:SetFrameLevel(MK:GetFrameLevel() + 30)
+    P.histBtn = histBtn
+    P.histBtnLabel = hbt
+
+    -- 日期标签：与「过去 3 天」「为自己点赞」同一套皮——金色实心贴图、
+    -- 26 高、13px 深色字。三枚并排，选中的那枚用亮金，其余压暗。
+    local tabs = { }
+    for i = 1, 3 do
+        local tab = CreateFrame("Button", nil, MK)
+        tab:SetSize(82, 26)
+        tab:SetPoint("TOPLEFT", MK, "TOPLEFT", 206 + (i - 1) * 86, -314)
+
+        local bg = tab:CreateTexture(nil, "ARTWORK")
+        bg:SetAllPoints(tab)
+        AS.FlatTex(bg, 0.32, 0.25, 0.11, 0.92)
+        tab.bg = bg
+
+        local lab = txt(tab, 13, { 0.86, 0.76, 0.54 })
+        lab:SetPoint("CENTER", tab, "CENTER", 0, 0)
+        lab:SetText("")
+        tab.label = lab
+        tab.text = lab
+        tab.idx = i
+        tab.isSel = false
+
+        tab:SetScript("OnClick", function(self)
+            if not self.dateKey then return end
+            P.histView = self.dateKey
+            scrollTop = 1          -- 换一天就从头看
+            pcall(P.Refresh, P)
+        end)
+
+        -- 悬停只在不选中时给一点提亮，选中态保持最亮
+        tab:SetScript("OnEnter", function(self)
+            if self.isSel then
+                AS.FlatTex(self.bg, 0.85, 0.68, 0.33, 1)
+            else
+                AS.FlatTex(self.bg, 0.48, 0.38, 0.17, 0.95)
+            end
+        end)
+        tab:SetScript("OnLeave", function(self)
+            if self.isSel then
+                AS.FlatTex(self.bg, 0.72, 0.56, 0.26, 0.95)
+            else
+                AS.FlatTex(self.bg, 0.32, 0.25, 0.11, 0.92)
+            end
+        end)
+
+        tab:SetFrameLevel(MK:GetFrameLevel() + 30)
+        tab:Hide()
+        tabs[i] = tab
+    end
+    P.histTabs = tabs
+
+
     table.insert(UISpecialFrames, "StepWardenFrame")
 
     MK:SetScript("OnHide", function()
@@ -1092,21 +1208,95 @@ function P:Refresh()
     local c = AS.char
     local m = math.floor
 
-    if el.steps then el.steps:SetText(AS:Comma(m(c.steps or 0))) end
-    if el.walk then el.walk:SetText(string.format(AS.S.LINE_WALK, m((c.walkSec or 0) / 60))) end
-    if el.mount then el.mount:SetText(string.format(AS.S.LINE_MOUNT, m((c.mountSec or 0) / 60))) end
-    if el.ride then el.ride:SetText(string.format(AS.S.LINE_RIDE, m((c.rideSec or 0) / 60))) end
-    if el.distance then
-        el.distance:SetText(string.format(AS.S.LINE_DISTANCE, (c.yards or 0) * 0.9144 / 1000))
+    -- 两个数据源：今日走实时数据，历史页走当天归档的快照，
+    -- 但共用同一套控件，所以排版完全一致。
+    --
+    -- 原来用 histMode + selDate 两个字段描述"在不在历史页"，
+    -- 两处赋值一旦不同步，就会出现标签铺着、数据还是今天的。
+    -- 现在只认 histView：非 nil 就是在看那一天。
+    local histDate = P.histView
+    if histDate then
+        -- 记录的日期不在归档里了（换了角色、存档被清），退回最新一期
+        local ds = AS.Stats:HistDates()
+        local found = false
+        for i = 1, #ds do
+            if ds[i] == histDate then found = true break end
+        end
+        if not found then
+            P.histView = ds[1]
+            histDate = P.histView
+        end
+        if not histDate then
+            -- 一期都没有，收起标签退回今日
+            if P.histTabs then
+                for i = 1, #P.histTabs do P.histTabs[i]:Hide() end
+            end
+        end
     end
-    if el.kcal then el.kcal:SetText(AS:Comma(m(c.kcal or 0))) end
+    local data, list, myRank, total
+    if histDate then
+        data = AS.Stats:HistEntry(histDate) or { }
+        list = AS.Stats:RankingFromSnapshot(histDate)
+        total = #list
+        myRank = 0
+        for i = 1, #list do
+            if list[i].isMe then myRank = i break end
+        end
+    else
+        data = c
+        list = AS.Stats:BuildRanking()
+        myRank, total = AS.Stats:MyRank()
+    end
+
+    if el.steps then el.steps:SetText(AS:Comma(m(data.steps or 0))) end
+    if el.walk then el.walk:SetText(string.format(AS.S.LINE_WALK, m((data.walkSec or 0) / 60))) end
+    if el.mount then el.mount:SetText(string.format(AS.S.LINE_MOUNT, m((data.mountSec or 0) / 60))) end
+    if el.ride then el.ride:SetText(string.format(AS.S.LINE_RIDE, m((data.rideSec or 0) / 60))) end
+    if el.distance then
+        el.distance:SetText(string.format(AS.S.LINE_DISTANCE, (data.yards or 0) * 0.9144 / 1000))
+    end
+    if el.kcal then el.kcal:SetText(AS:Comma(m(data.kcal or 0))) end
+
+    -- 卡片里的标签：今日是「今日步数」，历史页换成那一期的日期
+    if el.steplabel then
+        if histDate then
+            el.steplabel:SetText(AS.HistDateLabel(histDate))
+        else
+            el.steplabel:SetText(AS.S.LABEL_TODAY)
+        end
+    end
+
+    -- 结算条：历史页没有倒计时，改报归档状态
+    if el.settletitle then
+        if histDate then
+            el.settletitle:SetText(AS.S.HIST_SETTLED)
+        else
+            el.settletitle:SetText(AS.S.SETTLE_TITLE)
+        end
+    end
+    if el.period then
+        if histDate then
+            el.period:SetText(AS.S.HIST_SUB)
+        else
+            el.period:SetText(AS.S.SETTLE_PERIOD)
+        end
+    end
+
+    -- 今日页与历史页的三个按钮互斥。放在 Refresh 里而不是只在 FillTabs 里，
+    -- 因为返回今日走的是 HideHistory -> Refresh，不经过 FillTabs。
+    if P.histBtn then
+        if histDate then P.histBtn:Hide() else P.histBtn:Show() end
+    end
+    if P.selfLike then
+        if histDate then P.selfLike:Hide() else P.selfLike:Show() end
+    end
+    if P.retBtn then
+        if histDate then P.retBtn:Show() else P.retBtn:Hide() end
+    end
 
     if el.cbCheck then
         if AS:IsLikeWhisperEnabled() then el.cbCheck:Show() else el.cbCheck:Hide() end
     end
-
-    local list = AS.Stats:BuildRanking()
-    local myRank, total = AS.Stats:MyRank()
 
     if el.myRank then
         if myRank > 0 then
@@ -1115,14 +1305,16 @@ function P:Refresh()
             el.myRank:SetText(AS.S.RANK_DASH)
         end
     end
-    if el.mySteps then el.mySteps:SetText(string.format(AS.S.STEPS_VAL, AS:Comma(m(c.steps or 0)))) end
-    if el.myKcal then el.myKcal:SetText(string.format(AS.S.KCAL_VAL, AS:Comma(m(c.kcal or 0)))) end
+    if el.mySteps then el.mySteps:SetText(string.format(AS.S.STEPS_VAL, AS:Comma(m(data.steps or 0)))) end
+    if el.myKcal then el.myKcal:SetText(string.format(AS.S.KCAL_VAL, AS:Comma(m(data.kcal or 0)))) end
 
+    -- 标题只报总人数。原来还会拼一段「上期 日期」，
+    -- 那一段占了排行榜标题行中间的位置，已去掉。
+    if el.rankTitle then
+        el.rankTitle:SetText(histDate and AS.S.HIST_TOP_ALL or AS.S.RANK_TITLE)
+    end
     if el.rankCount then
-        local mineEntry = c.settled and c.settled[1]
-        if total > 0 and mineEntry then
-            el.rankCount:SetText(string.format(AS.S.RANK_COUNT_DATE, total, mineEntry.date or "—"))
-        elseif total > 0 then
+        if total > 0 then
             el.rankCount:SetText(string.format(AS.S.RANK_COUNT, total))
         else
             el.rankCount:SetText("")
@@ -1130,7 +1322,14 @@ function P:Refresh()
     end
 
     local n = #list
+    P.lastTotal = n
     local maxTop = math.max(1, n - MAX_ROWS + 1)
+
+    -- 日期标签跟着当前页一起铺，不只是打开时铺一次：
+    -- 换了日期、切回来、改语言都要重新对齐。
+    if histDate then
+        pcall(P.FillTabs, P)
+    end
 
     -- 只算"显示用"的位置，绝不回写 scrollTop。
     -- Refresh 会被步数变化和计时器高频调用，一旦在这里回写，
@@ -1148,12 +1347,21 @@ function P:Refresh()
         end
     end
 
-    -- 到顶/到底的箭头置灰并停用，避免点了没反应
+    -- 翻页箭头：只有真的多于一页才显示。
+    -- 原来人多时置灰停用、人少时仍挂着，历史页往往就 1-4 行，
+    -- 箭头挂在那儿点不动，看着像坏了。不够一页直接藏起来。
     if P.rankUp and P.rankDown then
-        P.rankUp:SetAlpha((top > 1) and 1 or 0.3)
-        P.rankUp:EnableMouse(top > 1)
-        P.rankDown:SetAlpha((top < maxTop) and 1 or 0.3)
-        P.rankDown:EnableMouse(top < maxTop)
+        if n > MAX_ROWS then
+            P.rankUp:Show()
+            P.rankDown:Show()
+            P.rankUp:SetAlpha((top > 1) and 1 or 0.3)
+            P.rankUp:EnableMouse(top > 1)
+            P.rankDown:SetAlpha((top < maxTop) and 1 or 0.3)
+            P.rankDown:EnableMouse(top < maxTop)
+        else
+            P.rankUp:Hide()
+            P.rankDown:Hide()
+        end
     end
 
     local shown = 0
@@ -1194,7 +1402,9 @@ function P:Refresh()
                     row.like:Show()
                 end
 
-                if not d.isMe then
+                if d.isHist then
+                    row.like:Hide()
+                elseif not d.isMe then
                     if AS.Comm:WasLiked(d.key) then
                         row.like.label:SetText(AS.S.LIKED_LABEL)
                         row.like.label:SetTextColor(0.55, 0.85, 0.55, 1)
@@ -1210,11 +1420,25 @@ function P:Refresh()
         end
     end
 
+    -- 只有一行时不弹空提示：历史归档里常常就只有自己一条，
+    -- 之前用 shown <= 1 判，导致切到那几天整页被"还没有好友数据"盖住，
+    -- 看起来像点了标签没反应。
     if el.empty then
-        if shown <= 1 then el.empty:Show() else el.empty:Hide() end
+        if shown == 0 then
+            el.empty:SetText(histDate and AS.S.HIST_EMPTY or AS.S.RANK_EMPTY)
+            el.empty:Show()
+        else
+            el.empty:Hide()
+        end
     end
 
-    P:UpdateCountdown()
+    if el.countdown then
+        if histDate then
+            el.countdown:SetText("")
+        else
+            P:UpdateCountdown()
+        end
+    end
 end
 
 --[[-----------------------------------------------------------------------------
@@ -1234,6 +1458,117 @@ function P:Collapse()
         Mini:Show()
         P:RefreshMini()
     end
+end
+
+--[[-----------------------------------------------------------------------------
+过去 3 天：复用今日排版，只把数据源换成归档快照
+-------------------------------------------------------------------------------]]
+local WEEKDAY_CN = { "日", "一", "二", "三", "四", "五", "六" }
+local WEEKDAY_EN = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" }
+
+-- 2026-11-17 -> 「11/17」和「11月17日  周一」
+function AS.HistDateParts(key)
+    local y, m, d = key:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return key, key end
+
+    -- 星期用算术直接算。WoW 的 time() 不接受表参数，
+    -- 之前写成 time({year=...}) 会报错，pcall 一吞整段就断了，标签全不显示。
+    local yy, mm, dd = tonumber(y), tonumber(m), tonumber(d)
+    local w = 0
+    if yy and mm and dd then
+        local t = { 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 }
+        local ny = (mm < 3) and (yy - 1) or yy
+        w = (ny + math.floor(ny / 4) - math.floor(ny / 100)
+             + math.floor(ny / 400) + t[mm] + dd) % 7
+        if w < 0 then w = w + 7 end
+    end
+
+    if AS.locale == "enUS" then
+        return string.format("%s/%s", m, d),
+               string.format("%s-%s-%s  %s", y, m, d, WEEKDAY_EN[w + 1] or "")
+    end
+    return string.format("%d/%d", tonumber(m), tonumber(d)),
+           string.format("%d月%d日  周%s", tonumber(m), tonumber(d), WEEKDAY_CN[w + 1] or "")
+end
+
+function AS.HistDateLabel(key)
+    local _, full = AS.HistDateParts(key)
+    return full
+end
+
+-- 把归档日期铺到三个标签上，并高亮当前选中的那个
+function P:FillTabs()
+    local tabs = P.histTabs
+    if not tabs then return { } end
+
+    local dates = AS.Stats:HistDates()
+    P.histDates = dates
+
+    -- 入口在今日页显示，翻到历史页后让位给标题行的日期标签；
+    -- 返回按钮占「为自己点赞」的位置，两者互斥。
+    if P.histBtn then
+        if P.histView then P.histBtn:Hide() else P.histBtn:Show() end
+    end
+    if P.selfLike then
+        if P.histView then P.selfLike:Hide() else P.selfLike:Show() end
+    end
+    if P.retBtn then
+        if P.histView then P.retBtn:Show() else P.retBtn:Hide() end
+    end
+
+    for i = 1, #tabs do
+        local d = dates[i]
+        if d then
+            tabs[i].dateKey = d
+            tabs[i].label:SetText((AS.HistDateParts(d)))
+            tabs[i]:Show()
+            -- 每次都按真实选中状态设色。之前用 curSel 缓存跳过重复设置，
+            -- 结果从今日页切回来时状态刚好没翻转，色块就停在暗色上。
+            local wantSel = (d == P.histView)
+            tabs[i].isSel = wantSel
+            if wantSel then
+                AS.FlatTex(tabs[i].bg, 0.72, 0.56, 0.26, 0.95)
+                tabs[i].text:SetTextColor(0.16, 0.12, 0.05)
+            else
+                AS.FlatTex(tabs[i].bg, 0.32, 0.25, 0.11, 0.92)
+                tabs[i].text:SetTextColor(0.86, 0.76, 0.54)
+            end
+        else
+            tabs[i].dateKey = nil
+            tabs[i]:Hide()
+        end
+    end
+
+    return dates
+end
+
+function P:OpenHistory()
+    if P.histView then
+        P:HideHistory()
+        return
+    end
+
+    local dates = AS.Stats:HistDates()
+    if #dates == 0 then
+        AS:Print(AS.S.HIST_EMPTY)
+        return
+    end
+
+    P.histView = dates[1]     -- 默认打开最新一期
+    scrollTop = 1
+    P:FillTabs()
+    P:Refresh()
+end
+
+function P:HideHistory()
+    P.histView = nil
+    scrollTop = 1
+
+    if P.histTabs then
+        for i = 1, #P.histTabs do P.histTabs[i]:Hide() end
+    end
+
+    P:Refresh()
 end
 
 function P:Show()

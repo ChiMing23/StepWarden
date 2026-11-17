@@ -1,5 +1,37 @@
 # StepWarden Changelog
 
+## V1.0.6 - 2026-11-18 - History view
+
+### Added
+
+- **"Last 3 days" history view.** The entry sits in the middle of the leaderboard title row. Opening it swaps the whole page over to archived data, with exactly the same layout as today - same big card, same ranking list, same rank strip - only the data source changes from live to the snapshot frozen at that day's settlement.
+- **Three date tabs.** The latest three cycles sit side by side on the right of the title row, newest first, leftmost being the most recent day. Click a tab to switch days; the selected one renders in bright gold while the others stay dim.
+- **"Back to today" button.** It takes the same slot as the self-like button once you are in the history view. The two are mutually exclusive and share identical size and colour.
+- **Offline settlement.** If you are not online at the settlement hour, the next login finishes the archive using the final figures already saved to disk, so your entry reflects the last recorded numbers of that day. A new `lastSeen` field records the moment you went offline and is stored alongside the archived entry for later diagnosis.
+
+### Changed
+
+- **"Last 3 days" now matches the self-like button.** Solid gold texture, 112x26, 13 px dark text, hover brightening the fill to `0.85/0.68/0.33`. It previously used a dark fill with a gold border and gold text - a completely different visual language.
+- **Date tabs share that same skin.** 82x26 solid gold. The selected tab is bright gold with dark text; the others sit at `0.32/0.25/0.11` and brighten one step on hover.
+- **Leaderboard filtered by the current period.** Cached friend scores are now checked against the current cycle and excluded if they were broadcast earlier. A character who has not logged in for two days no longer lingers on today's board.
+- **Paging arrows hidden when there is less than one page.** They used to stay on the title row and do nothing when the list was short. Now they are removed outright when there is nothing to page through.
+
+### Fixed
+
+- **History view always showed today's data.** `Refresh` called `HistDateLabel(...)` without the `AS.` prefix, so it was invoking a global that does not exist. Every pass threw at that line and aborted. Because that line sits partway through the render chain, the title, the head count, the rank strip and every row after it never ran - the panel kept whatever was drawn last time, which was today's numbers. Calling `AS.HistDateLabel(...)` restores the whole chain.
+- **A single-record day was buried under the empty-state message.** The check read `shown <= 1`, and archived days often contain only yourself. That "no friend data yet" line sat across the middle of the list, looking like the tab click did nothing. Changed to `shown == 0`, and the history view now uses its own wording.
+- **Date tabs sometimes failed to highlight.** A repaint cache added to reduce per-second redraws skipped the colour update when the selection happened to equal the cached value - exactly the case when returning from today to the history view. The cache is gone; colour is now set from the real state on every pass.
+- **History mode state could contradict itself.** It was described by two fields, `histMode` and `selDate`. Whenever the two assignments fell out of sync you got tabs drawn while the data stayed on today. They are now merged into a single `histView`: non-empty means you are viewing that day, empty means today. The contradictory state is structurally impossible now.
+- **`c.lastSeen` was dead weight.** It was initialised and then never updated or read by anything. It now refreshes on every tick.
+
+### Notes
+
+- Archives are written at the 22:00 settlement, so the first complete ranking after upgrading appears at the next settlement.
+- Only the latest 3 cycles are kept; older ones roll off automatically.
+- A snapshot only contains friends who were present at settlement. If only you had data on a given day, the history view for that day shows a single row. That is not a display bug.
+
+---
+
 ## V1.0.5 - 2026-11-16 - UI overhaul and rank badges
 
 ### Added

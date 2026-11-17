@@ -40,6 +40,10 @@ function S:Tick(dt)
     local c = AS.char
     if not c then return end
 
+    -- 记下最后一次在线的时刻。结算时一并归档，
+    -- 这样"离线期间按当日最后记录上榜"这件事有据可查。
+    c.lastSeen = time()
+
     local onTaxi = false
     if UnitOnTaxi then
         local ok, v = pcall(UnitOnTaxi, "player")
@@ -133,18 +137,69 @@ function S:Settle(key)
 
     key = key or c.window or AS:WindowKey()
     local entry = {
-        date   = key,
-        steps  = math.floor(c.steps or 0),
-        trips  = c.trips or 0,
-        kcal   = math.floor(c.kcal or 0),
-        yards  = math.floor(c.yards or 0),
-        race   = AS:GetRaceToken(),
-        owner  = AS:CharKey(),
+        date     = key,
+        steps    = math.floor(c.steps or 0),
+        trips    = c.trips or 0,
+        tripFlight = c.tripFlight or 0,
+        tripBoat   = c.tripBoat or 0,
+        tripTele   = c.tripTele or 0,
+        kcal     = math.floor(c.kcal or 0),
+        yards    = math.floor(c.yards or 0),
+        walkSec  = math.floor(c.walkSec or 0),
+        mountSec = math.floor(c.mountSec or 0),
+        rideSec  = math.floor(c.rideSec or 0),
+        race     = AS:GetRaceToken(),
+        owner    = AS:CharKey(),
+        lastSeen = c.lastSeen or 0,
     }
+
+    -- 同一天可能被重复结算（/step test、系统时间回拨、反复跨窗口），
+    -- 先把旧的同日期条目摘掉，保证每天只有一条记录。
+    for i = #c.settled, 1, -1 do
+        local e = c.settled[i]
+        if type(e) == "table" and e.date == key then
+            table.remove(c.settled, i)
+        end
+    end
 
     table.insert(c.settled, 1, entry)
     while #c.settled > AS.KEEP_DAYS do
         table.remove(c.settled)
+    end
+
+    -- 冻结当天的排行榜，供历史记录页回看。
+    -- 必须在这里取，因为 peers 只缓存最新一期的数据，过了这天就被覆盖了。
+    if AS.db then
+        if type(AS.db.snapshots) ~= "table" then AS.db.snapshots = {} end
+        local snap = {}
+        local ok, rows = pcall(S.BuildRanking, S)
+        if not ok then
+            -- 以前这里静默吞掉，出问题时快照会是空表，看起来就像"没归档"
+            AS:Print("[StepWarden] 快照构建失败：" .. tostring(rows))
+            rows = nil
+        end
+        if ok and type(rows) == "table" then
+            for _, r in ipairs(rows) do
+                snap[#snap + 1] = {
+                    key   = r.key,
+                    name  = r.name,
+                    steps = math.floor(r.steps or 0),
+                    trips = r.trips or 0,
+                    kcal  = math.floor(r.kcal or 0),
+                    isMe  = r.isMe and true or nil,
+                }
+            end
+        end
+        AS.db.snapshots[key] = snap
+
+        -- 只留最近 HIST_DAYS 期
+        local dates = {}
+        for d in pairs(AS.db.snapshots) do dates[#dates + 1] = d end
+        table.sort(dates)
+        while #dates > (AS.HIST_DAYS or 3) do
+            AS.db.snapshots[dates[1]] = nil
+            table.remove(dates, 1)
+        end
     end
 
     -- 自己的分数也进 peers，方便统一排序
@@ -163,7 +218,37 @@ function S:Settle(key)
         AS.Comm:BroadcastScore(entry)
     end
 
+    -- 归档写完就开始新的一天：当日数字归零、好友排行清空。
+    -- 顺序必须在写快照之后，否则刚冻结的那份会被清掉。
+    S:ResetDay()
+
     if AS.Panel and AS.Panel.Refresh then AS.Panel:Refresh() end
+end
+
+-- 归档之后把当天从头开始。
+-- 归档过的东西已经落在 settled（个人成绩）和 snapshots（当期排行）里，
+-- 这里清的是"今天这一份"，所以历史不受影响。
+function S:ResetDay()
+    local c = AS.char
+    if not c then return end
+
+    c.yards     = 0
+    c.steps     = 0
+    c.kcal      = 0
+    c.trips     = 0
+    c.tripFlight = 0
+    c.tripBoat   = 0
+    c.tripTele   = 0
+    c.walkSec   = 0
+    c.mountSec  = 0
+    c.rideSec   = 0
+    c.window    = AS:WindowKey()
+
+    -- 好友排行不跨期保留：新一天各自重新计步，靠广播重新汇聚
+    local peers = AS.db and AS.db.peers
+    if type(peers) == "table" then
+        for k in pairs(peers) do peers[k] = nil end
+    end
 end
 
 -- 排行榜：自己 + 好友缓存，按步数降序
@@ -186,10 +271,15 @@ function S:BuildRanking()
         local myFull = (AS:ShortName() or ""):lower()
         -- UnitName 只给名字第一段，所以半名和全名两种形态都要排除，否则自己占两行
         local myBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
+        -- 只认当期广播：好友下线后 peers 里那份成绩会一直留着，
+        -- 不按日期筛的话，几天没上线的人会一直在今日榜上挂着。
+        local curWin = AS:WindowKey()
         for key, p in pairs(AS.db.peers) do
             local nm = AS:NamePart(key)
             local low = nm:lower()
-            if key ~= AS:CharKey() and low ~= myFull and low ~= myBase and type(p) == "table" then
+            if type(p) == "table" and p.date ~= curWin then
+                -- 上一期的成绩，不再计入今日榜
+            elseif key ~= AS:CharKey() and low ~= myFull and low ~= myBase and type(p) == "table" then
                 table.insert(rows, {
                     key   = key,               -- 全名
                     name  = nm,                -- 角色名
@@ -201,6 +291,119 @@ function S:BuildRanking()
                     isPeer = true,
                 })
             end
+        end
+    end
+
+    table.sort(rows, function(a, b)
+        if (a.steps or 0) == (b.steps or 0) then
+            return (a.name or "") < (b.name or "")
+        end
+        return (a.steps or 0) > (b.steps or 0)
+    end)
+
+    return rows
+end
+
+--[[-----------------------------------------------------------------------------
+历史查询（给「过去 3 天」用）
+-------------------------------------------------------------------------------]]
+
+-- 有归档的日期，按新到旧排，最多 HIST_DAYS 天。
+-- 以 snapshots 为准：它是结算时写的，一定和榜单同时存在；
+-- settled 可能因为旧版本清理或换角色而缺失。
+function S:HistDates()
+    local seen, out = { }, { }
+
+    -- 两个来源都算一期：快照里的一定有榜单；settled 里有、
+    -- 但当时还没开始写快照的老数据，至少有个人成绩。
+    local snap = AS.db and AS.db.snapshots
+    if type(snap) == "table" then
+        for d in pairs(snap) do seen[d] = true end
+    end
+
+    local c = AS.char
+    if c and type(c.settled) == "table" then
+        for _, e in ipairs(c.settled) do
+            if type(e) == "table" and e.date then seen[e.date] = true end
+        end
+    end
+
+    for d in pairs(seen) do out[#out + 1] = d end
+    table.sort(out, function(a, b) return a > b end)
+    while #out > (AS.HIST_DAYS or 3) do
+        table.remove(out)
+    end
+    return out
+end
+
+-- 某一天的个人成绩：先找 settled，找不到就从快照里认自己那条
+function S:HistEntry(date)
+    local c = AS.char
+    if c and type(c.settled) == "table" then
+        for _, e in ipairs(c.settled) do
+            if type(e) == "table" and e.date == date then return e end
+        end
+    end
+
+    local snap = AS.db and AS.db.snapshots and AS.db.snapshots[date]
+    if type(snap) == "table" then
+        local meBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
+        local myFull = (AS:ShortName() or ""):lower()
+        for _, r in ipairs(snap) do
+            local nm = (r.name or ""):lower()
+            if r.isMe or nm == meBase or nm == myFull then
+                return {
+                    date    = date,
+                    steps   = r.steps or 0,
+                    trips   = r.trips or 0,
+                    kcal    = r.kcal or 0,
+                    yards   = 0,
+                    walkSec = 0,
+                    mountSec = 0,
+                    rideSec = 0,
+                }
+            end
+        end
+    end
+    return nil
+end
+
+-- 把某天的快照转成和「今日排行榜」同构的列表，便于面板复用同一套行渲染
+function S:RankingFromSnapshot(date)
+    local rows = { }
+
+    local snap = AS.db and AS.db.snapshots and AS.db.snapshots[date]
+    if type(snap) ~= "table" or #snap == 0 then
+        -- 这一期是在「快照功能上线前」结算的，只留下了个人成绩。
+        -- 至少把自己那一行补上，历史页不至于整页空白。
+        local e = S:HistEntry(date)
+        if e then
+            rows[1] = {
+                key = AS:CharKey(), name = AS:ShortName(),
+                steps = e.steps or 0, trips = e.trips or 0, kcal = e.kcal or 0,
+                date = date, isMe = true, isHist = true,
+            }
+        end
+        return rows
+    end
+
+    local meBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
+    local myFull = (AS:ShortName() or ""):lower()
+
+    for i = 1, #snap do
+        local r = snap[i]
+        if type(r) == "table" then
+            local nm = (r.name or ""):lower()
+            rows[#rows + 1] = {
+                key    = r.key,
+                name   = r.name,
+                steps  = r.steps or 0,
+                trips  = r.trips or 0,
+                kcal   = r.kcal or 0,
+                date   = date,
+                isMe   = (r.isMe or (nm ~= "" and (nm == meBase or nm == myFull))) and true or nil,
+                isHist = true,
+            }
         end
     end
 
