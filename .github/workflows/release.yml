@@ -1,9 +1,9 @@
 name: Release
 
+# 只在手动触发时运行。tag push 不再自动打包发布：
+# 正式包由本地脚本产出（带正确的目录结构和校验过的 CHANGELOG），
+# packager 会自动改写 release 标题、追加 release.json，容易和本地包打架。
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -24,6 +24,3 @@ jobs:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
-        # 不传 args：packager 默认即可打 zip 并发布到 GitHub Release。
-        # 想发 CurseForge 再加 -p <项目数字ID>，想发 Wago 再加 -a <addon-id>。
-        # 注意：-g 是 game-version（后面必须跟版本参数），不是"发布到 GitHub"。
