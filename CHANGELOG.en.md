@@ -2,12 +2,17 @@
 
 ## V1.0.6.5 - 2026-11-18 - Peers visible again
 
-> Patch release for V1.0.6. Two fixes that made friends disappear from the board. The UI and the save structure are untouched, so you can install straight over the previous version.
+> Patch release for V1.0.6. Two fixes that made friends disappear from the board, plus a rewrite of the like-whisper copy. The UI and the save structure are untouched, so you can install straight over the previous version.
 
 ### Fixed
 
 - **Replies to a score request carried last cycle's numbers.** When someone asked for scores, the reply preferred `settled[1]` - the most recent settled entry - including its date. The board only accepts the current cycle, so the receiver classified it as a previous-cycle result and dropped it. Asking around produced nothing. Replies now always carry the current cycle's live totals and the current cycle's date. This one is independent of which version the other side runs; V1.0.6 players hit it against each other too.
 - **Date-only filtering misjudged people who were online.** The board filter compared `date` strictly and discarded anything that did not match. Older clients can attach the previous cycle's date at settlement and on reply, so a player who was perfectly online vanished from the list. When the date does not match, the filter now falls back to `ts`: a broadcast within the last day still counts, and only anything older than a day is treated as expired. The existing "no activity for two days, off the board" behaviour is preserved.
+
+### Improved
+
+- **Like whispers now answer to your rank**: previously everyone got the same line. Ranks 1, 2 and 3 each get their own - gold, silver, bronze - with the tone following the placement; fourth and below (plus the fallback case) share a general one. The "last cycle" qualifier is gone too, since the board only ever shows the current cycle and mentioning the previous one just made people think they were reading yesterday's results
+- Both language packs were rewritten, not translated from one another. The Chinese reads like a friend ribbing you; the English leans on the dry, self-deprecating humour WoW players tend to use
 
 ### Notes
 

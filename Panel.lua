@@ -358,7 +358,7 @@ local function MakeRow(parent, index)
             AS:Print(string.format(AS.S.LIKE_ALREADY, d.name or ""))
             return
         end
-        AS.Comm:SendLike(d.name, d.key, d.steps)
+        AS.Comm:SendLike(d.name, d.key, d.steps, row.idx)
         if AS:IsLikeWhisperEnabled() then
             AS:Print(string.format(AS.S.LIKE_SENT, d.name or ""))
         else
@@ -1373,6 +1373,7 @@ function P:Refresh()
             if d then
                 shown = shown + 1
                 row.data = d
+                row.idx = idx          -- 供点赞时区分冠亚季军
                 row:Show()
                 row.rank:SetText(tostring(idx))
                 -- 列表只渲染角色名：服务器名（如 "CN1 Realm 8 PvE"）有 20 个字符，

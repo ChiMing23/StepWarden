@@ -500,7 +500,7 @@ function C:WasLiked(targetKey)
     return c and c.likes[targetKey] == (c.window or "") and true or false
 end
 
-function C:SendLike(targetName, targetKey, steps)
+function C:SendLike(targetName, targetKey, steps, rank)
     -- 优先用带服务器后缀的 key 当目标：跨服好友只有全名才发得出去
     local dest = targetKey
     if not dest or dest == "" then dest = targetName end
@@ -512,10 +512,23 @@ function C:SendLike(targetName, targetKey, steps)
         return true
     end
 
-    local msg = string.format(
-        (AS.S and AS.S.WHISPER_LIKE) or "[StepWarden] gave you a like! You walked %s steps last cycle.",
-        AS:Comma(steps or 0)
-    )
+    -- 前三名各有一句专门的文案，其余用通用那句。
+    -- 名次直接取榜单上显示的那个序号，不在这里重新排序，
+    -- 免得私信里说的名次和玩家眼睛看到的名次对不上。
+    local key = "WHISPER_LIKE"
+    if rank == 1 then
+        key = "WHISPER_LIKE_1"
+    elseif rank == 2 then
+        key = "WHISPER_LIKE_2"
+    elseif rank == 3 then
+        key = "WHISPER_LIKE_3"
+    end
+
+    local tpl = (AS.S and AS.S[key])
+        or (AS.S and AS.S.WHISPER_LIKE)
+        or "[StepWarden] gave you a like! You walked %s steps."
+
+    local msg = string.format(tpl, AS:Comma(steps or 0))
 
     local ok, err = pcall(SendChatMessage, msg, "WHISPER", nil, dest)
     if not ok and AS.Print then

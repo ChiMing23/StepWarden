@@ -499,7 +499,6 @@ L.zhCN = {
     RANK_TITLE      = "好友运动排名",
     RANK_EMPTY      = "还没有好友数据。换上装了 StepWarden 的朋友一起跑，22:00 后面板会自动结算排名。",
     RANK_COUNT      = "共 %d 人",
-    RANK_COUNT_DATE = "共 %d 人 · 上期 %s",
 
     TOPLIKE_DEFAULT = "给榜首点赞",
     TOPLIKE_ACTION  = "给榜首 %s 点赞",
@@ -577,7 +576,10 @@ L.zhCN = {
     HELP_TEXT       = "/step 打开面板 · /step config 打开设置 · /step mini 唤出挂件 · /step alpha 0.8 透明度 · /step reset 清零今日 · /step clear 清好友缓存 · /step wipe 清空历史 · /step hist 历史记录 · /step test 模拟结算",
 
     -- 私信 / Whisper
-    WHISPER_LIKE    = "【艾泽拉斯足迹】给你点了个赞！上期你走了 %s 步，挺能跑。",
+    WHISPER_LIKE_1  = "【艾泽拉斯足迹】给你点了个赞！今天的榜首是你，%s 步——金冠戴稳了，别晃掉。",
+    WHISPER_LIKE_2  = "【艾泽拉斯足迹】给你点了个赞！今天第二名，%s 步。银冠也挺亮，就是没金的那股嚣张。",
+    WHISPER_LIKE_3  = "【艾泽拉斯足迹】给你点了个赞！今天第三名，%s 步。铜冠也是冠，别嫌它土。",
+    WHISPER_LIKE    = "【艾泽拉斯足迹】给你点了个赞！你走了 %s 步，腿没白长。明天要不要往前挤两名？",
     LIKE_WS_FAIL    = "密语没发出去：找不到 %s，对方可能不在本服好友列表里。",
 }
 
@@ -632,7 +634,6 @@ L.enUS = {
     RANK_TITLE      = "Friend Ranking",
     RANK_EMPTY      = "No friend data yet. Run alongside friends who also use StepWarden; the panel settles the ranking at 22:00.",
     RANK_COUNT      = "%d player(s)",
-    RANK_COUNT_DATE = "%d player(s) · last cycle %s",
 
     TOPLIKE_DEFAULT = "Like the leader",
     TOPLIKE_ACTION  = "Like leader %s",
@@ -707,7 +708,10 @@ L.enUS = {
     UNKNOWN_CMD     = "Unknown command: %s. Try /step help",
     HELP_TEXT       = "/step panel · /step config settings · /step mini show widget · /step alpha 0.8 opacity · /step reset clear today · /step clear friend cache · /step wipe clear history · /step hist history · /step test simulate settle",
 
-    WHISPER_LIKE    = "[StepWarden] gave you a like! You walked %s steps last cycle - nice pace.",
+    WHISPER_LIKE_1  = "[StepWarden] gave you a like! Top of the board today - %s steps. Gold crown, and the bragging rights that come with it. Wear it well.",
+    WHISPER_LIKE_2  = "[StepWarden] gave you a like! Second today - %s steps. Silver medal energy: so close it stings a little.",
+    WHISPER_LIKE_3  = "[StepWarden] gave you a like! Third today - %s steps. Bronze. Still a crown. Technically.",
+    WHISPER_LIKE    = "[StepWarden] gave you a like! %s steps today - legs clearly doing their job. Feel like climbing two spots tomorrow?",
     LIKE_WS_FAIL    = "Whisper not delivered - %s could not be reached. They may not be on this realm.",
 }
 
