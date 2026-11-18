@@ -5,7 +5,7 @@ StepWarden - Core
 local ADDON, AS = ...
 
 AS.ADDON   = ADDON
-AS.VERSION = "V1.0.6"
+AS.VERSION = "V1.0.6.5"
 
 -- 每晚结算的小时（服务器/本地时间），到点后开启新的一天
 AS.SETTLE_HOUR = 22

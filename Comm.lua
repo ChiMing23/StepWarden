@@ -459,18 +459,17 @@ function C:OnMessage(text, sender)
         if steps then StoreScore(sender, steps, trips, kcal, dateKey) end
 
     elseif kind == "Q" then
-        -- 有人要分数：回一条自己最近一期的
+        -- 有人要分数：回自己当前这一期的实时成绩。
+        -- 早先这里优先回 settled[1]（上一期已结算的成绩），连日期也是上一期的；
+        -- 而榜单只认当期，收到的人会把它当成"上期成绩"直接丢掉，等于白问一圈。
+        -- 实时排行要的是当期数字，所以这里一律用当期累计值与当期日期。
         local c = AS.char
         if c then
-            local mine = c.settled and c.settled[1]
-            local entry = {
-                steps = mine and mine.steps or math.floor(c.steps or 0),
-                trips = mine and mine.trips or c.trips or 0,
-                kcal  = mine and mine.kcal or math.floor(c.kcal or 0),
-                date  = mine and mine.date or AS:WindowKey(),
-            }
             local msg = string.format("S|%d|%d|%d|%s",
-                entry.steps, entry.trips, entry.kcal, entry.date)
+                math.floor(c.steps or 0),
+                c.trips or 0,
+                math.floor(c.kcal or 0),
+                AS:WindowKey())
             -- 只回给请求者本人；再广播一遍会让 N 人互相回消息成 N×N 放大
             SendAM(msg, "WHISPER", sender)
         end

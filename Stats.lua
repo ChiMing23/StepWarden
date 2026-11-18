@@ -273,23 +273,34 @@ function S:BuildRanking()
         local myBase = (AS:NamePart(UnitName("player") or "") or ""):lower()
         -- 只认当期广播：好友下线后 peers 里那份成绩会一直留着，
         -- 不按日期筛的话，几天没上线的人会一直在今日榜上挂着。
+        --
+        -- 但对方给的 date 不能全信。结算与 Q 应答在旧版里都可能带上"上一期"的
+        -- 日期，只按 date 比对会把在线的人误判成上期成绩剔掉。所以 date 对不上
+        -- 时改用 ts 兜底：一天以内有过广播的照收，超过一天才算真的过期。
         local curWin = AS:WindowKey()
+        local now = time()
         for key, p in pairs(AS.db.peers) do
-            local nm = AS:NamePart(key)
-            local low = nm:lower()
-            if type(p) == "table" and p.date ~= curWin then
-                -- 上一期的成绩，不再计入今日榜
-            elseif key ~= AS:CharKey() and low ~= myFull and low ~= myBase and type(p) == "table" then
-                table.insert(rows, {
-                    key   = key,               -- 全名
-                    name  = nm,                -- 角色名
-                    steps = p.steps or 0,
-                    trips = p.trips or 0,
-                    kcal  = p.kcal or 0,
-                    date  = p.date or "",
-                    ts    = p.ts,
-                    isPeer = true,
-                })
+            if type(p) == "table" then
+                local nm = AS:NamePart(key)
+                local low = nm:lower()
+                local stale
+                if p.date == curWin then
+                    stale = false
+                else
+                    stale = (now - (p.ts or 0)) > 86400
+                end
+                if not stale and key ~= AS:CharKey() and low ~= myFull and low ~= myBase then
+                    table.insert(rows, {
+                        key   = key,               -- 全名
+                        name  = nm,                -- 角色名
+                        steps = p.steps or 0,
+                        trips = p.trips or 0,
+                        kcal  = p.kcal or 0,
+                        date  = p.date or "",
+                        ts    = p.ts,
+                        isPeer = true,
+                    })
+                end
             end
         end
     end
