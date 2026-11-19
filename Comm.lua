@@ -367,6 +367,16 @@ function C:RequestAll()
     end
 
     SendToFriends(msg)
+
+    -- 顺带把版本号广播一次，同伴收到比自己新的就能提示去更新。
+    -- 单开一条 V 消息而不是塞进 Q：Q 的应答格式被旧版写死成 S|...，
+    -- 改动它会让老客户端解析失败。
+    local vmsg = "V|" .. tostring(AS.VERSION or "")
+    if IsInGuild and IsInGuild() then
+        SendAM(vmsg, "GUILD")
+    end
+
+    SendToFriends(vmsg)
 end
 
 -- 通讯诊断
@@ -472,6 +482,24 @@ function C:OnMessage(text, sender)
                 AS:WindowKey())
             -- 只回给请求者本人；再广播一遍会让 N 人互相回消息成 N×N 放大
             SendAM(msg, "WHISPER", sender)
+        end
+
+    elseif kind == "V" then
+        -- 同伴的版本号。只在对方比自己新的时候记下来，
+        -- 免得自己是最新版、却被一群旧版客户端反过来提示"有新版本"。
+        -- 载荷形如 "V|V1.0.8"，竖线后面还带一个版本前缀 V，别指望第一个字符就是数字
+        local ver = text:match("^V|V?(%d+%.%d+%.%d+%.?%d*)")
+        if ver then
+            ver = "V" .. ver
+            local mine = tostring(AS.VERSION or "")
+            if AS:VersionRank(ver) > AS:VersionRank(mine) then
+                if AS.db and AS.db.newVer ~= ver then
+                    AS.db.newVer = ver
+                    AS:Print(string.format(
+                        (AS.S and AS.S.NEWER_VER_LOG) or "New version %s found.", ver, mine))
+                end
+                if AS.Panel and AS.Panel.Refresh then AS.Panel:Refresh() end
+            end
         end
     end
 end

@@ -1,5 +1,31 @@
 # StepWarden Changelog
 
+## V1.0.7 - 2026-11-19 - History dates on the calendar
+
+> Fixes the off-by-one day in the history view and adds a new-version notice. The save file gets a one-off migration; just install over the old version.
+
+### Fixed
+
+- **History dates were a day behind**: settling archived under `char.window`, which is the value recorded when the *previous* cycle began - one whole day earlier than the cycle that just finished. So a settlement run at 22:00 on 11-18 got filed under `2026-11-17`, and the history view always looked one day short. It now archives under the day that just ended
+- **Duplicate entries for the same day in `settled`**: the old dedupe only scanned the key being settled and could not clean up records already sitting in the save. Now the whole table is scanned by date after inserting, keeping only the frontmost (newest) entry per day
+- **History tabs could lose a slot**: the tab list used to be derived from whichever snapshot dates happened to exist, so a missing cycle meant a missing tab. It now always counts 0/1/2 days back from the current window - three tabs every time, with empty ones shown as empty rather than dropped
+
+### Added
+
+- **New-version notice**: on login the addon broadcasts an extra `V|version` message. If a peer reports something newer, it gets recorded. The bottom line of the panel normally states the ranking policy; once a newer version is seen it switches to the notice and turns gold. One notice per version
+- Version comparison pads to four segments (`1.0.7` and `1.0.6.5` differ in segment count, and comparing them naively yields the wrong answer). Only a strictly newer peer triggers the notice, so being on the latest build never gets you nagged by older clients
+
+### Migration
+
+- On first load, existing archive dates are shifted forward one day to line up with the calendar, and duplicate entries are cleaned up in the same pass. Gated by `db.schema = 2`, runs once
+
+### Notes
+
+- The protocol gains a `V` message type, fully separate from the existing `S|steps|trips|kcal|date` and `Q`. Older clients ignore unknown prefixes, so data exchange is unaffected
+- Save structure matches V1.0.6.5 plus one `schema` field. Install straight over it; no need to delete SavedVariables from `WTF`
+
+---
+
 ## V1.0.6.5 - 2026-11-18 - Peers visible again
 
 > Patch release for V1.0.6. Two fixes that made friends disappear from the board, plus a rewrite of the like-whisper copy. The UI and the save structure are untouched, so you can install straight over the previous version.

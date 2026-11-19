@@ -5,7 +5,7 @@ StepWarden - Core
 local ADDON, AS = ...
 
 AS.ADDON   = ADDON
-AS.VERSION = "V1.0.6.5"
+AS.VERSION = "V1.0.7"
 
 -- 每晚结算的小时（服务器/本地时间），到点后开启新的一天
 AS.SETTLE_HOUR = 22
@@ -202,12 +202,56 @@ function AS:NameReport()
     return list
 end
 
--- 当前统计窗口的标识：22:00 前属于前一天
-function AS:WindowKey(t)
+-- 当前统计窗口的起点时刻：22:00 前属于前一天
+function AS:WindowBase(t)
     t = t or time()
     local h = tonumber(date("%H", t)) or 0
-    local base = h < AS.SETTLE_HOUR and (t - 86400) or t
-    return date("%Y-%m-%d", base)
+    return h < AS.SETTLE_HOUR and (t - 86400) or t
+end
+
+-- 当前统计窗口的标识：22:00 前属于前一天
+function AS:WindowKey(t)
+    return date("%Y-%m-%d", AS:WindowBase(t))
+end
+
+-- 当前窗口往前 n 天的日期键。给历史页算「过去三天」用。
+-- 结算归档用的就是窗口键，所以第 i 期正是"当前窗口往前 i 天"，
+-- 不依赖存档里恰好存在几期快照，缺数据的那期自然显示为空。
+function AS:DayKeysBefore(n)
+    local base = AS:WindowBase()
+    return date("%Y-%m-%d", base - (n or 1) * 86400)
+end
+
+-- 日期键往后挪一天。"2026-11-30" -> "2026-12-01"，跨月跨年闰月都算。
+-- WoW 的 os.time 不收表参数，所以只能自己排日历。
+function AS:NextDayKey(key)
+    local y, m, d = tostring(key or ""):match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if not y then return key end
+    local yy, mm, dd = tonumber(y), tonumber(m), tonumber(d)
+    local mdays = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+    local leap = ((yy % 4 == 0) and (yy % 100 ~= 0)) or (yy % 400 == 0)
+    if leap then mdays[2] = 29 end
+    dd = dd + 1
+    if dd > mdays[mm] then
+        dd = 1
+        mm = mm + 1
+        if mm > 12 then mm = 1; yy = yy + 1 end
+    end
+    return string.format("%04d-%02d-%02d", yy, mm, dd)
+end
+
+-- 把 "V1.0.6.5" 这类版本号压成可比较的整数。
+-- 段数不一样（1.0.7 是三段、1.0.6.5 是四段）时必须按四段补齐再比，
+-- 否则位数不同会得出"1.0.6.5 比 1.0.7 新"这种反向结论。
+function AS:VersionRank(v)
+    local parts = { 0, 0, 0, 0 }
+    local i = 1
+    for p in tostring(v or ""):gmatch("%d+") do
+        if i > 4 then break end
+        parts[i] = tonumber(p) or 0
+        i = i + 1
+    end
+    return ((parts[1] * 1000 + parts[2]) * 1000 + parts[3]) * 1000 + parts[4]
 end
 
 -- 距下次结算还有多少秒
@@ -403,6 +447,50 @@ function AS:InitDB()
     if type(c.settled) ~= "table" then c.settled = {} end
     if type(c.likes) ~= "table" then c.likes = {} end
 
+    -- 一次性迁移（schema 1 -> 2）。
+    -- 旧版本归档时用的是"这一期的起点日"（22:00 之前算前一天的那个窗口键），
+    -- 所以 11-18 结算出来的成绩被记在了 11-17 名下，历史页看起来永远差一天。
+    -- 现在结算改按"刚走完的那一天"归档，已有数据整体后移一天即可对齐。
+    -- 只做一次，之后靠 db.schema 挡住，避免反复挪动。
+    if (tonumber(db.schema) or 0) < 2 then
+        local shifted = { }
+        if type(db.snapshots) == "table" then
+            for k, v in pairs(db.snapshots) do
+                shifted[AS:NextDayKey(k)] = v
+            end
+        end
+        db.snapshots = shifted
+
+        for _, cc in pairs(type(db.chars) == "table" and db.chars or { }) do
+            if type(cc.settled) == "table" then
+                for _, e in ipairs(cc.settled) do
+                    if type(e) == "table" and type(e.date) == "string" then
+                        e.date = AS:NextDayKey(e.date)
+                    end
+                end
+                -- 挪完之后可能有两条挤到同一天，只留最前面（最新）的那条
+                local seen, i = { }, 1
+                while i <= #cc.settled do
+                    local e = cc.settled[i]
+                    local d = (type(e) == "table" and type(e.date) == "string") and e.date or nil
+                    if not d then
+                        table.remove(cc.settled, i)
+                    elseif seen[d] then
+                        table.remove(cc.settled, i)
+                    else
+                        seen[d] = true
+                        i = i + 1
+                    end
+                end
+                while #cc.settled > AS.KEEP_DAYS do
+                    table.remove(cc.settled)
+                end
+            end
+        end
+
+        db.schema = 2
+    end
+
     AS.db = db
     AS.char = c
     AS:RefreshWindow()
@@ -412,9 +500,12 @@ end
 function AS:RefreshWindow()
     local key = AS:WindowKey()
     if AS.char.window ~= key then
-        -- 窗口已经变了但还没结算：先补结算旧窗口
+        -- 窗口已经变了但还没结算：先补结算刚才走完的那一期。
+        -- 归档日期取"结算这一刻的窗口键"，也就是刚结束的那一天，
+        -- 而不是 char.window —— 后者是上一期开始时记下的旧值，比它晚一天，
+        -- 照它归档会让玩家看到的历史日期永远比日历差一天。
         if AS.char.window ~= "" then
-            if AS.Stats and AS.Stats.Settle then AS.Stats:Settle(AS.char.window) end
+            if AS.Stats and AS.Stats.Settle then AS.Stats:Settle(key) end
         end
         AS.char.window = key
         AS.char.yards = 0
@@ -517,6 +608,8 @@ L.zhCN = {
     SELF_LIKE_MSG   = "今天已经走了 %s 步，给自己记一笔。",
 
     FOOT_NOTE       = "排名按实时数据排序，每晚 22:00 定格存档",
+    NEWER_VER       = "同伴有更新的版本 %s，建议更新后再一起跑",
+    NEWER_VER_LOG   = "发现新版本 %s（当前 %s）。WoW 插件无法自行下载，请到发布页更新。",
     CB_LIKE         = "点赞时发送私信",
     CB_ON_TIP       = "点赞会同时发送一条私信。",
     CB_OFF_TIP      = "点赞只在本地记录，不发送私信。",
@@ -652,6 +745,8 @@ L.enUS = {
     SELF_LIKE_MSG   = "You walked %s steps today. Give yourself credit.",
 
     FOOT_NOTE       = "Ranked by live data, frozen and archived at 22:00",
+    NEWER_VER       = "A friend runs newer version %s - worth updating",
+    NEWER_VER_LOG   = "New version %s found (you are on %s). Addons cannot self-update; grab it from the release page.",
     CB_LIKE         = "Whisper on like",
     CB_ON_TIP       = "Liking also sends a whisper.",
     CB_OFF_TIP      = "Likes are recorded locally only; no whisper is sent.",

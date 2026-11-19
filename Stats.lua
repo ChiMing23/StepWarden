@@ -154,15 +154,24 @@ function S:Settle(key)
     }
 
     -- 同一天可能被重复结算（/step test、系统时间回拨、反复跨窗口），
-    -- 先把旧的同日期条目摘掉，保证每天只有一条记录。
-    for i = #c.settled, 1, -1 do
-        local e = c.settled[i]
-        if type(e) == "table" and e.date == key then
-            table.remove(c.settled, i)
+    -- 旧版本也留过同日期两条的记录。新条目插到最前面之后，
+    -- 整张表按日期扫一遍，每个日期只留排在最前（也就是最新）的那条。
+    table.insert(c.settled, 1, entry)
+    do
+        local seen, i = { }, 1
+        while i <= #c.settled do
+            local e = c.settled[i]
+            local d = (type(e) == "table" and type(e.date) == "string") and e.date or nil
+            if not d then
+                table.remove(c.settled, i)      -- 结构残缺的条目直接丢掉
+            elseif seen[d] then
+                table.remove(c.settled, i)      -- 同日期重复，留前面那条
+            else
+                seen[d] = true
+                i = i + 1
+            end
         end
     end
-
-    table.insert(c.settled, 1, entry)
     while #c.settled > AS.KEEP_DAYS do
         table.remove(c.settled)
     end
@@ -319,30 +328,17 @@ end
 历史查询（给「过去 3 天」用）
 -------------------------------------------------------------------------------]]
 
--- 有归档的日期，按新到旧排，最多 HIST_DAYS 天。
--- 以 snapshots 为准：它是结算时写的，一定和榜单同时存在；
--- settled 可能因为旧版本清理或换角色而缺失。
+-- 历史页要显示的三期：从"刚走完的那一天"往前数，永远是最新三个已归档的日期。
+-- 结算归档用的就是这个窗口键，所以第 i 期 = 当前窗口往前 i-1 天。
+-- 结算之后窗口前移一天，这三个日期自动整体后移，不用等人来手动刷新。
+-- 某一期没有快照（早期版本还没写快照功能）时日期照样占一格，
+-- 点进去由 RankingFromSnapshot 降级成"只有自己"，不至于整页空白。
+-- 不再用"存档里恰好有哪几期"来决定标签，否则缺一期标签就少一格。
 function S:HistDates()
-    local seen, out = { }, { }
-
-    -- 两个来源都算一期：快照里的一定有榜单；settled 里有、
-    -- 但当时还没开始写快照的老数据，至少有个人成绩。
-    local snap = AS.db and AS.db.snapshots
-    if type(snap) == "table" then
-        for d in pairs(snap) do seen[d] = true end
-    end
-
-    local c = AS.char
-    if c and type(c.settled) == "table" then
-        for _, e in ipairs(c.settled) do
-            if type(e) == "table" and e.date then seen[e.date] = true end
-        end
-    end
-
-    for d in pairs(seen) do out[#out + 1] = d end
-    table.sort(out, function(a, b) return a > b end)
-    while #out > (AS.HIST_DAYS or 3) do
-        table.remove(out)
+    local out = { }
+    local days = AS.HIST_DAYS or 3
+    for i = 1, days do
+        out[#out + 1] = AS:DayKeysBefore(i - 1)
     end
     return out
 end

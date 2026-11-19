@@ -516,7 +516,18 @@ function P:Relocalize()
         if el.sl1          then el.sl1:SetText(AS.S.STEPS_LBL) end
         if el.kl1          then el.kl1:SetText(AS.S.KCAL_LBL) end
         if el.selfLikeText then el.selfLikeText:SetText(AS.S.SELF_LIKE) end
-        if el.foot         then el.foot:SetText(AS.S.FOOT_NOTE) end
+        if el.foot then
+            -- 底部一行平时写排名口径；一旦同伴广播来了更新的版本号，
+            -- 就改报版本提示并转成金色，比埋在聊天框里更容易被看见。
+            local nv = AS.db and AS.db.newVer
+            if nv then
+                el.foot:SetText(string.format(AS.S.NEWER_VER, nv))
+                el.foot:SetTextColor(C_GOLDT[1], C_GOLDT[2], C_GOLDT[3])
+            else
+                el.foot:SetText(AS.S.FOOT_NOTE)
+                el.foot:SetTextColor(C_DIM[1], C_DIM[2], C_DIM[3])
+            end
+        end
         if el.cbLabel      then el.cbLabel:SetText(AS.S.CB_LIKE) end
         if el.alabel       then el.alabel:SetText(AS.S.BG_LBL) end
     end
