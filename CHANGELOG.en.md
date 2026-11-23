@@ -1,5 +1,28 @@
 # StepWarden Changelog
 
+## V1.0.75 - 2026-11-24 - Friend list interface hardening
+
+> Install over the previous build. The save structure is untouched; only the way the friend list is read has changed.
+
+### Fixed
+
+- **Friend count could not be read, so the whole friend path was skipped**: `C_FriendList.GetNumFriends()` returns *nothing at all* in some client states - not nil, just no return value. The old `tonumber(select(1, ...))` threw `bad argument #1 to 'tonumber' (value expected)` right there, aborting the function before a single iteration ran
+- The visible symptom: users running the same addon never showed up. The list came back empty, broadcasts never went out, and the ranking contained only yourself
+
+### Changed
+
+- New `safeCount` helper wraps the interface call in `pcall`; anything that is not a plain number - empty, nil, or secret - collapses to 0 so the caller never dies while asking for a count
+- Added a fallback: when the count is unavailable, read the length of the table from `C_FriendList.GetFriends()`
+- A `connected` flag that comes back as a secret boolean is skipped before it is used, so it never trips the secret restriction inside a conditional
+- The legacy `GetNumFriends` / `GetFriendInfo` path got the same protection, so both client flavours are covered
+
+### Notes
+
+- When the count cannot be obtained, that pass over the friend list is skipped and **no red errors are thrown**; broadcasts still go out over the Battle.net friend channel
+- Compared with V1.0.7 only the friend-list part of `Comm.lua` changed. History dates and the new-version notice are untouched
+
+---
+
 ## V1.0.7 - 2026-11-19 - History dates on the calendar
 
 > Fixes the off-by-one day in the history view and adds a new-version notice. The save file gets a one-off migration; just install over the old version.

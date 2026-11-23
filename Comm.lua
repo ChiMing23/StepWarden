@@ -10,6 +10,19 @@ local C = AS.Comm
 C.PREFIX = "AZSteps"
 C.lastRequest = 0   -- RequestAll 节流时间戳
 
+-- 1.60.1 起，受污染上下文拿到的数量/布尔可能是 secret 值：不能 tonumber、
+-- 不能参与算术、也不能直接拿来判断真假。引擎没这套机制时兜底成恒假。
+local issecretvalue = issecretvalue or function() return false end
+
+-- 安全地取一个"数量"：接口返回值可能是空、nil、secret，任何一种都不该炸掉调用方
+local function safeCount(fn)
+    if not fn then return 0 end
+    local ok, n = pcall(fn)
+    if not ok then return 0 end
+    if type(n) ~= "number" or issecretvalue(n) then return 0 end
+    return n
+end
+
 --[[-----------------------------------------------------------------------------
 底层发送
 -------------------------------------------------------------------------------]]
@@ -73,24 +86,42 @@ end
 function C:OnlineFriends()
     local out = {}
 
-    if C_FriendList and C_FriendList.GetNumFriends and C_FriendList.GetFriendInfoByIndex then
-        local n = tonumber(select(1, C_FriendList.GetNumFriends())) or 0
-        for i = 1, n do
-            local f = C_FriendList.GetFriendInfoByIndex(i)
-            if type(f) == "table" and f.connected then
-                -- fullName 才带 "-服务器"，跨服好友拿它当密语目标才发得出去
-                local nm = f.fullName or f.name
-                if nm then table.insert(out, nm) end
+    -- 1.60.1 的 GetNumFriends 有时不返回值（secret 机制下直接返回空），
+    -- 直接 tonumber 会抛 "bad argument #1 to 'tonumber' (value expected)"。
+    -- 数量统一交给 safeCount，拿不到就退回 GetFriends() 的表长度。
+    if C_FriendList and C_FriendList.GetFriendInfoByIndex then
+        pcall(function()
+            local n = safeCount(C_FriendList.GetNumFriends)
+            if n <= 0 and C_FriendList.GetFriends then
+                local okList, list = pcall(C_FriendList.GetFriends)
+                if okList and type(list) == "table" then n = #list end
             end
-        end
-        return out
+            if n <= 0 then return end
+
+            for i = 1, n do
+                local okInfo, f = pcall(C_FriendList.GetFriendInfoByIndex, i)
+                if okInfo and type(f) == "table" then
+                    -- connected 可能是 secret 布尔，不能直接判断真假
+                    local connected = f.connected
+                    if not issecretvalue(connected) and connected then
+                        -- fullName 才带 "-服务器"，跨服好友拿它当密语目标才发得出去
+                        local nm = f.fullName or f.name
+                        if type(nm) == "string" and nm ~= "" then
+                            table.insert(out, nm)
+                        end
+                    end
+                end
+            end
+        end)
+        if #out > 0 then return out end
     end
 
     if GetNumFriends and GetFriendInfo then
-        local n = tonumber(select(1, GetNumFriends())) or 0
+        local n = safeCount(GetNumFriends)
         for i = 1, n do
             local name, _, _, _, connected = GetFriendInfo(i)
-            if name and connected then
+            if type(name) == "string" and name ~= ""
+                and not issecretvalue(connected) and connected then
                 table.insert(out, name)
             end
         end
